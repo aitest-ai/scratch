@@ -2,10 +2,14 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <title>Scratch 實驗室 (GAS 安全版)</title>
+    <title>Scratch 實驗室 (全功能終極修復版)</title>
     
     <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
 
     <style>
         :root { 
@@ -35,7 +39,7 @@
             align-items: center;
             transition: all 1s cubic-bezier(0.25, 1, 0.5, 1);
             pointer-events: auto;
-            z-index: 10000; /* 比遮罩高，比暖心夥伴低 */
+            z-index: 10000; 
         }
 
         .scroll-handle {
@@ -64,11 +68,9 @@
             background-size: 20px 100%;
         }
 
-        /* === 展開狀態 === */
         .scroll-container.open { width: 700px; } 
         .scroll-container.open .scroll-body { width: 100%; }
 
-        /* === 縮小收回狀態 (精準對齊 Sidebar) === */
         .scroll-container.minimized {
             top: 15px !important; 
             left: 15px !important; 
@@ -121,13 +123,13 @@
 
 
         /* ========================
-           2. 左側面板 (Sidebar)
+           2. Layout & Components
            ======================== */
         .sidebar { 
             width: 320px; background: white; padding: 15px; 
             display: flex; flex-direction: column; border-right: 2px solid #E0E0E0; 
             z-index: 10; box-shadow: 4px 0 15px rgba(0,0,0,0.05);
-            padding-top: 190px; /* 預留上方空間給卷軸 */
+            padding-top: 190px; 
             position: relative; box-sizing: border-box; 
         }
 
@@ -155,9 +157,6 @@
         .stress-bar-bg { height: 12px; background: #eee; border-radius: 10px; overflow: hidden; margin-top: 8px; }
         .stress-fill { height: 100%; width: 0%; background: var(--primary); transition: width 0.5s, background 0.5s; border-radius: 10px; }
 
-        /* ========================
-           3. 右側與 TA 面板
-           ======================== */
         .main-area { flex: 1; position: relative; display: flex; flex-direction: column; overflow: hidden; }
         .scratch-frame { flex: 1; width: 100%; border: none; }
 
@@ -188,12 +187,12 @@
         .msg.system { background: #FFF3E0; color: #E65100; text-align: center; font-size: 0.9em; border: 1px solid #FFE0B2; align-self: center; width: 90%; border-radius: 10px; }
 
         /* ========================
-           4. 暖心 AI 彈窗 (層級最高)
+           4. 暖心 AI 彈窗 (z-index 20000)
            ======================== */
         .empathy-modal {
             position: fixed; top: 0; left: 0; width: 100%; height: 100%;
             background: rgba(255, 255, 255, 0.85); 
-            z-index: 20000; /* 最高層級，蓋住卷軸 */
+            z-index: 20000; 
             display: none;
             justify-content: center; align-items: center; backdrop-filter: blur(5px);
         }
@@ -294,6 +293,9 @@
                 <div class="msg ai">嗨！我是積木大師。寫程式遇到問題很正常，你可以打字問我，或是按相機讓我看看你的程式喔！</div>
             </div>
             <div class="ta-input-row">
+                <input type="file" id="sb3-upload" accept=".sb3" style="display: none;" onchange="handleFileUpload(this)">
+                <button class="btn-icon" title="上傳 SB3 檔案評分" onclick="document.getElementById('sb3-upload').click()">📂</button>
+                
                 <button class="btn-icon" title="截圖給導師看" onclick="captureAndAnalyze('TA_NORMAL')">📸</button>
                 <input type="text" id="ta-input" class="ta-input" placeholder="問導師問題..." onkeypress="if(event.key==='Enter') sendTextChat()">
                 <button class="btn-send" onclick="sendTextChat()">送出</button>
@@ -305,20 +307,63 @@
     <canvas id="capture-canvas"></canvas>
 
     <script>
-        // ★★★ 請在此處填入您的 GAS 部署網址 ★★★
+        // ★★★ Firebase 設定 ★★★
+        const firebaseConfig = {
+            apiKey: "AIzaSyAycsCJlelXGO-vWQ-kgE5Yjk6n9YM0x4o",
+            authDomain: "scratch-f5862.firebaseapp.com",
+            projectId: "scratch-f5862",
+            storageBucket: "scratch-f5862.firebasestorage.app",
+            messagingSenderId: "13853303932",
+            appId: "1:13853303932:web:a3ca5fee96dd24d87995f9",
+            measurementId: "G-3YXSLPKJY1"
+        };
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.firestore();
+
+        // ★★★ GAS URL ★★★
         const GAS_URL = "https://script.google.com/macros/s/AKfycbzJpobTeEyfpB85AcYhINpl-4gA3ubLiXmI185COXN508SgTtCm838aH8agSyZNg9XH/exec"; 
         
+        // ★★★ 完整 Prompts ★★★
         const TA_SYSTEM_PROMPT = `
         你是 Scratch 積木大師。對象是小學高年級。
         **核心規則：**
-        1. **禁止一次給出完整答案**：請像剝洋蔥一樣，一次只教一個步驟。
-        2. **一步一步來**：每次回答只能專注於這一步，不要跳到下一步。
-        3. **短回答**：每次回答請控制在 50 字以內，簡單易懂。
-        4. **提問引導**：每講完一個觀念，請用問句結尾，確認學生懂了才繼續。
-        5. **應對亂碼或閒聊**：
-           - 如果學生輸入亂碼（如 asdf）或符號，請用幽默的方式（例如說那是外星語）請他專注。
-           - **絕對不要**跟著學生閒聊。
+        1. 禁止一次給出完整答案，請一步一步引導。
+        2. 短回答，用問句結尾。
+        3. **【違規檢測】**：
+           請判斷學生的訊息是否為「亂碼」、「純符號」、「與程式完全無關的閒聊（如幾歲、住哪）」或「負面發洩」。
+           - 如果是：請用幽默或溫柔的方式將話題拉回，**並且**在回答的最後面加上標籤： <<<OFF_TOPIC>>>
+           - 如果否：正常回答，不要加標籤。
         注意：如果使用者傳送了圖片，那是 Scratch 畫面的「放大裁切」截圖，請專注於檢查程式邏輯是否符合跳跳貓任務(空白鍵->Y+100->等待->Y-100)。
+        `;
+
+        const EMPATHY_SYSTEM_PROMPT = `
+        你是一個「暖心夥伴」。使用者是小學高年級學生。
+        **你的核心任務：**
+        1. **安撫情緒**：當學生感到挫折、生氣或想放棄時，給予同理心和鼓勵。
+        2. **引導回歸**：讓學生願意回到 Scratch 學習中。
+
+        **絕對遵守的限制：**
+        1. **字數限制**：每次回答必須控制在 **250 字以內**，短小精幹。
+        2. **禁止教學**：你 **完全不懂程式**。如果學生問「怎麼做？」、「積木怎麼拚？」、「為什麼跑不動？」，請 **拒絕回答技術細節**，並引導學生：「這個技術問題要回去問『積木大師』喔！他才是專家。」
+        3. **語氣**：溫柔、幽默、像好朋友一樣。
+        `;
+
+        const RUBRIC_GAME = `
+        【國小遊戲組 - 評分規準】
+        1. 程式說明文件 (15%)：目標清楚、規則連貫、勝負條件明確。
+        2. 遊戲趣味性 (20%)：內容豐富、音效美術精緻、具吸引力。
+        3. 互動操作性 (20%)：操作順暢、介面細緻、體驗優良。
+        4. 獨特創意性 (20%)：高度創新、引發共鳴、印象深刻。
+        5. 功能完整性 (25%)：功能完整、無錯誤、流程順利。
+        `;
+
+        const RUBRIC_ANIMATION = `
+        【國小動畫組 - 評分規準】
+        1. 敘事設計 (5%)：劇情完整流暢、角色場景交代清楚。
+        2. 流程與場景規劃 (10%)：規劃完整、順序合理、角色動作到位。
+        3. 程式設計 (30%)：結構清楚、動畫正確、運用多種控制積木、流暢自然。
+        4. 故事呈現 (30%)：轉場流暢、節奏清楚、音效字幕精緻。
+        5. 創意表達 (25%)：角色場景鮮明、畫面表現巧思、音效特效新穎。
         `;
 
         let state = {
@@ -344,7 +389,7 @@
             }, 3300); 
         };
 
-        // 行為偵測
+        // --- 行為偵測 ---
         document.addEventListener('mousemove', (e) => {
             const now = Date.now();
             state.mousePositions.push({x: e.clientX, y: e.clientY, t: now});
@@ -356,46 +401,35 @@
                     const p2 = state.mousePositions[i];
                     dist += Math.sqrt(Math.pow(p2.x-p1.x, 2) + Math.pow(p2.y-p1.y, 2));
                 }
-                // 提高靈敏度
                 if(dist > 1000) state.mouseScore = Math.min(100, state.mouseScore + 15);
                 else state.mouseScore = Math.max(0, state.mouseScore - 5); 
             }
         });
-        
         document.addEventListener('keydown', (e) => { 
             if(e.target.tagName === 'INPUT') return;
             state.keyPressCount++; 
         });
-        
         document.addEventListener('mousedown', () => { state.clickCount++; });
 
         setInterval(() => {
             if(state.clickCount > 3) state.mouseScore = Math.min(100, state.mouseScore + 20);
             if(state.keyPressCount > 5) state.keyScore = Math.min(100, state.keyScore + 20);
             else state.keyScore = Math.max(0, state.keyScore - 5);
-
             state.clickCount = 0; state.keyPressCount = 0;
-            
             updateMetricColor('score-mouse', state.mouseScore);
             updateMetricColor('score-key', state.keyScore);
             updateMetricColor('score-face', state.faceScore);
-
             state.stress = Math.max(state.faceScore, state.mouseScore, state.keyScore);
-            
             if (state.stress === state.faceScore) state.dominantStressor = 'FACE';
             else if (state.stress === state.mouseScore) state.dominantStressor = 'MOUSE';
             else state.dominantStressor = 'KEY';
-
             document.getElementById('stress-val').innerText = state.stress + "%";
             const bar = document.getElementById('stress-bar');
             bar.style.width = state.stress + "%";
-            
             if(state.stress < 50) document.getElementById('stress-bar').style.background = "#4C97FF";
             else if(state.stress < 80) document.getElementById('stress-bar').style.background = "#FFAB19";
             else document.getElementById('stress-bar').style.background = "#FF6B6B";
-
             if(state.stress > 80) triggerEmpathyAI(state.dominantStressor);
-
         }, 500); 
 
         function updateMetricColor(id, score) {
@@ -447,32 +481,58 @@
             }, 1000); 
         }
 
-        // ==========================================
-        // ★★★ 嚴格亂碼/無意義偵測 ★★★
-        // ==========================================
-        function analyzeTextForStress(text) {
-            const gibberish = /(.)\1{2,}|asdf|qwer|zxcv|1234|uiop|hjkl/i;
-            const badWords = /煩|討厭|爛|笨|死|不會|難|哭|靠|媽的|機車|滾|醜|白癡|智障|幹/;
+        // --- SB3 Upload ---
+        async function handleFileUpload(input) {
+            const file = input.files[0];
+            if (!file) return;
 
-            if (gibberish.test(text) || badWords.test(text)) {
-                state.keyScore = Math.min(100, state.keyScore + 30);
-                updateMetricColor('score-key', state.keyScore);
-                return 'STRESS'; 
+            const taBox = document.getElementById('ta-chat');
+            taBox.innerHTML += `<div class="msg user">📂 上傳檔案：${file.name}</div>`;
+            taBox.innerHTML += `<div class="msg ai">正在分析 Scratch 專案，請稍等...</div>`;
+            
+            try {
+                const zip = new JSZip();
+                const contents = await zip.loadAsync(file);
+                if (!contents.files['project.json']) {
+                    throw new Error("找不到 project.json，這可能不是有效的 sb3 檔案。");
+                }
+                const projectJson = await contents.files['project.json'].async('string');
+                
+                const prompt = `
+                這是一個學生上傳的 Scratch 專案代碼 (project.json)。
+                
+                **任務目標：**
+                1. **分類**：請分析程式碼特徵，判斷它是「遊戲」還是「動畫」。
+                   - 遊戲特徵：有分數變數、鍵盤滑鼠互動多、有碰撞偵測、有勝負條件。
+                   - 動畫特徵：大量使用「說」、「等待」、「滑行」、背景切換、沒有太多互動。
+                
+                2. **評分**：根據分類，使用下方的評分規準進行評分。
+                
+                ${RUBRIC_GAME}
+                
+                ${RUBRIC_ANIMATION}
+                
+                **輸出格式：**
+                - **專案類型**：(遊戲 / 動畫)
+                - **總分**：(0-100)
+                - **分項評分**：(請列出各項得分)
+                - **評語與建議**：(請給出具體建議，鼓勵學生)
+
+                **專案代碼內容：**
+                ${projectJson.substring(0, 50000)} ... (內容過長截斷)
+                `;
+
+                state.taChatHistory.push({ role: 'user', parts: [{ text: prompt }] });
+                await sendToGAS(state.taChatHistory, 'TA', null);
+
+            } catch (e) {
+                console.error(e);
+                taBox.innerHTML += `<div class="msg ai">❌ 檔案讀取失敗：${e.message}</div>`;
             }
-
-            const chatty = /幾歲|住哪|叫什麼|無聊|你好|哈囉|hi|hello|age|name|誰|笨蛋|機器人|吃飯|睡覺|真的|假的/;
-            const nonsense = /^[\.。,，\?？!！]{2,}$|^.{0,2}$/; 
-
-            if (chatty.test(text) || nonsense.test(text)) {
-                return 'OFF_TOPIC'; 
-            }
-
-            return 'NORMAL';
+            input.value = '';
         }
 
-        // ==========================================
-        // 4. 訊息發送邏輯 (第3次強制攔截)
-        // ==========================================
+        // --- Chat Logic ---
         async function sendTextChat() {
             const input = document.getElementById('ta-input');
             const val = input.value.trim();
@@ -483,35 +543,112 @@
             taBox.scrollTop = taBox.scrollHeight;
             input.value = "";
 
-            const analysis = analyzeTextForStress(val);
+            // ★★★ 隱形指令：確保每次都進行檢查 ★★★
+            const instruction = "\n\n[系統指令：如果這則訊息是亂碼、符號或閒聊，請在回應最後加上 <<<OFF_TOPIC>>>]";
             
-            if (analysis !== 'NORMAL') {
-                state.offTopicCount++;
-                console.log(`異常偵測 (${analysis}) 次數：${state.offTopicCount}`);
-                
-                // ★★★ 第 3 次：強制攔截，不呼叫 API ★★★
-                if (state.offTopicCount >= 3) {
-                    taBox.innerHTML += `<div class="msg system" style="color:red;">[系統] 偵測到學習中斷，正在呼叫暖心夥伴...</div>`;
-                    taBox.scrollTop = taBox.scrollHeight;
-                    triggerEmpathyAI('BOREDOM'); 
-                    return; // 終止函式
-                }
-                // ★★★ 第 1-2 次：繼續執行，讓 Gemini 根據 Prompt 回應 ★★★
-            } else {
-                state.offTopicCount = 0; 
-            }
-
             let messageText = val;
             if (state.taChatHistory.length === 0) {
-                messageText = TA_SYSTEM_PROMPT + "\n\n學生問：" + val;
+                messageText = TA_SYSTEM_PROMPT + "\n\n學生問：" + val + instruction;
+            } else {
+                messageText = val + instruction;
             }
 
             state.taChatHistory.push({ role: 'user', parts: [{ text: messageText }] });
-            
-            // ★★★ 呼叫 GAS (請填入正確網址) ★★★
-            await sendToGAS(state.taChatHistory, 'TA');
+            await sendToGAS(state.taChatHistory, 'TA', null);
         }
 
+        // ★★★ 核心函式：發送 GAS 並存入 Firestore (只存 Base64) ★★★
+        async function sendToGAS(history, type, currentImageBase64) {
+            
+            // 1. 存入 Firestore (包含圖片 Base64，如果不太大的話)
+            try {
+                let docData = {
+                    type: type,
+                    history: history.slice(-2), // 只存最後兩筆，省空間
+                    timestamp: firebase.firestore.FieldValue.serverTimestamp()
+                };
+                
+                // 如果有圖片，嘗試存入
+                if (currentImageBase64) {
+                    docData.imageBase64 = currentImageBase64; 
+                }
+
+                await db.collection("chat_logs").add(docData);
+            
+            } catch(e) {
+                console.warn("Firestore save failed (likely data too large), but continuing AI request.", e);
+            }
+
+            // 2. 準備給 GAS 的瘦身 Payload (只留文字 + 當下這張圖)
+            const lightweightHistory = history.map(item => {
+                const parts = item.parts.map(part => {
+                    if (part.inline_data) return { text: "[Image History]" };
+                    return part;
+                });
+                return { role: item.role, parts: parts };
+            });
+
+            if (currentImageBase64) {
+                const lastMsgIndex = lightweightHistory.length - 1;
+                if (lightweightHistory[lastMsgIndex].role === 'user') {
+                    lightweightHistory[lastMsgIndex].parts.push({
+                        inline_data: { mime_type: "image/jpeg", data: currentImageBase64 }
+                    });
+                }
+            }
+
+            const payload = { contents: lightweightHistory };
+
+            // 3. 發送給 GAS
+            try {
+                const res = await fetch(GAS_URL, {
+                    method: 'POST', 
+                    body: JSON.stringify(payload)
+                });
+                const data = await res.json();
+                if(data.error) throw new Error(data.error.message);
+                let reply = data.candidates[0].content.parts[0].text;
+
+                if (type === 'TA') {
+                    // ★★★ 恢復 OFF_TOPIC 檢查邏輯 ★★★
+                    if (reply.includes("<<<OFF_TOPIC>>>")) {
+                        state.offTopicCount++;
+                        reply = reply.replace("<<<OFF_TOPIC>>>", ""); 
+                        console.log(`[AI偵測] 違規內容，累積次數：${state.offTopicCount}`);
+
+                        if (state.offTopicCount >= 3) {
+                            const taBox = document.getElementById('ta-chat');
+                            taBox.innerHTML += `<div class="msg ai">${marked.parse(reply)}</div>`;
+                            taBox.scrollTop = taBox.scrollHeight;
+                            
+                            setTimeout(() => { triggerEmpathyAI('BOREDOM'); }, 1500);
+                            state.taChatHistory.push({ role: 'model', parts: [{ text: reply }] });
+                            return; 
+                        }
+                    } else {
+                        state.offTopicCount = 0;
+                    }
+                    const taBox = document.getElementById('ta-chat');
+                    taBox.innerHTML += `<div class="msg ai">${marked.parse(reply)}</div>`;
+                    taBox.scrollTop = taBox.scrollHeight;
+                    state.taChatHistory.push({ role: 'model', parts: [{ text: reply }] });
+                } else {
+                    addEmpathyMsg('warm', marked.parse(reply));
+                }
+            } catch(e) {
+                console.error("GAS Error:", e);
+                if (type === 'TA') {
+                    document.getElementById('ta-chat').innerHTML += `<div class="msg ai">連線錯誤 (請檢查 GAS 部署權限)。</div>`;
+                    state.taChatHistory.pop();
+                } else {
+                    addEmpathyMsg('warm', "網路有點卡卡的...");
+                }
+            }
+        }
+
+        // ==========================================
+        // 5. 暖心 AI
+        // ==========================================
         function triggerEmpathyAI(reason) {
             state.isInterventionActive = true;
             state.faceScore = 50; state.mouseScore = 0; state.keyScore = 0;
@@ -551,32 +688,11 @@
             const val = input.value.trim();
             if(!val) return;
             
-            const analysis = analyzeTextForStress(val);
-            if (analysis !== 'NORMAL') {
-                state.offTopicCount++;
-                if(state.offTopicCount >= 3) {
-                    addEmpathyMsg('warm', "看來你真的很不想寫程式吼 😂 好啦，我們再給積木大師一次機會，做完這個我們就休息！");
-                    input.value = "";
-                    return;
-                }
-            } else {
-                state.offTopicCount = 0; 
-            }
-
             addEmpathyMsg('user', val);
             input.value = "";
 
-            const prompt = `
-            你是一個「暖心夥伴」。使用者是小學高年級學生。
-            目標：
-            1. 如果學生在發洩情緒，請同理並安撫。
-            2. 如果學生覺得無聊或在閒聊，請用幽默風趣的方式，告訴他學會 Scratch 可以做很多很酷的事情。
-            `;
-
-            const history = [ { role: 'user', parts: [{ text: prompt }] }, ...state.empathyChatHistory ];
-            
-            // ★★★ 呼叫 GAS ★★★
-            await sendToGAS(history, 'EMPATHY');
+            const history = [ { role: 'user', parts: [{ text: EMPATHY_SYSTEM_PROMPT }] }, ...state.empathyChatHistory ];
+            await sendToGAS(history, 'EMPATHY', null);
         }
 
         function closeEmpathy() {
@@ -592,44 +708,6 @@
             state.offTopicCount = 0; 
             captureAndAnalyze('TA_STRESSED_' + state.dominantStressor);
             setTimeout(() => { state.isInterventionActive = false; }, 5000);
-        }
-
-        // ==========================================
-        // ★★★ GAS 請求發送 (共用) ★★★
-        // ==========================================
-        async function sendToGAS(history, type) {
-            const payload = { contents: history };
-
-            try {
-                const res = await fetch(GAS_URL, {
-                    method: 'POST', 
-                    body: JSON.stringify(payload)
-                });
-                
-                const data = await res.json();
-                
-                if(data.error) throw new Error(data.error.message);
-
-                const reply = data.candidates[0].content.parts[0].text;
-                
-                if (type === 'TA') {
-                    const taBox = document.getElementById('ta-chat');
-                    taBox.innerHTML += `<div class="msg ai">${marked.parse(reply)}</div>`;
-                    taBox.scrollTop = taBox.scrollHeight;
-                    state.taChatHistory.push({ role: 'model', parts: [{ text: reply }] });
-                } else {
-                    addEmpathyMsg('warm', marked.parse(reply));
-                }
-
-            } catch(e) {
-                console.error("GAS Error:", e);
-                if (type === 'TA') {
-                    document.getElementById('ta-chat').innerHTML += `<div class="msg ai">連線發生錯誤。</div>`;
-                    state.taChatHistory.pop();
-                } else {
-                    addEmpathyMsg('warm', "網路有點卡卡的...");
-                }
-            }
         }
 
         async function captureAndAnalyze(mode) {
@@ -652,21 +730,26 @@
                 await new Promise(r => setTimeout(r, 500)); 
 
                 const canvas = document.getElementById('capture-canvas');
+                
+                // ★★★ 裁切與縮圖邏輯 ★★★
                 const w = videoEl.videoWidth;
                 const h = videoEl.videoHeight;
                 const cropX = w * 0.20; const cropY = h * 0.10; 
                 const cropW = w * 0.45; const cropH = h * 0.80; 
 
                 let finalW = cropW; let finalH = cropH;
-                if (finalW > 800) {
-                    const scale = 800 / finalW; finalW = 800; finalH = cropH * scale;
+                if (finalW > 640) { // 限制最大寬度為 640px
+                    const scale = 640 / finalW; 
+                    finalW = 640; 
+                    finalH = cropH * scale; 
                 }
 
                 canvas.width = finalW; canvas.height = finalH;
                 const ctx = canvas.getContext('2d');
                 ctx.drawImage(videoEl, cropX, cropY, cropW, cropH, 0, 0, finalW, finalH);
                 
-                const base64 = canvas.toDataURL('image/jpeg', 0.7);
+                // ★★★ 壓縮圖片品質為 0.4，確保 Base64 夠小 ★★★
+                const base64 = canvas.toDataURL('image/jpeg', 0.4);
                 const cleanBase64 = base64.split(',')[1];
 
                 let userPrompt = "這是我目前的程式積木，請一步一步教我，一次只講一個觀念。";
@@ -679,12 +762,14 @@
                     userPrompt = TA_SYSTEM_PROMPT + "\n\n" + userPrompt;
                 }
 
+                // 存入 History (只存文字，圖片動態掛載)
                 state.taChatHistory.push({
                     role: 'user',
-                    parts: [ { text: userPrompt }, { inline_data: { mime_type: "image/jpeg", data: cleanBase64 } } ]
+                    parts: [ { text: userPrompt } ]
                 });
 
-                await sendToGAS(state.taChatHistory, 'TA');
+                // 呼叫 GAS，帶上最新的截圖 Base64
+                await sendToGAS(state.taChatHistory, 'TA', cleanBase64);
 
             } catch(e) {
                 console.error(e);

@@ -2,7 +2,7 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <title>Scratch 實驗室 (動機引導版)</title>
+    <title>Scratch 實驗室 (邏輯修復版)</title>
     
     <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
@@ -17,23 +17,27 @@
         /* ========================
            1. 橫向卷軸動畫系統
            ======================== */
+        /* 遮罩層 (背景變黑) */
         .mission-overlay {
             position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
-            background: rgba(0,0,0,0.6); z-index: 9999;
+            background: rgba(0,0,0,0.7); z-index: 9000; /* 比卷軸低一點 */
             display: flex; justify-content: center; align-items: center;
-            /* ★ 修改：移除延遲，讓背景消失更靈敏 */
             transition: opacity 0.5s ease;
             pointer-events: none; 
         }
 
+        /* 卷軸本體 (獨立於遮罩層) */
         .scroll-container {
-            position: relative;
+            position: fixed; /* 改為 Fixed 以便在螢幕上自由飛行 */
+            top: 50%; left: 50%; /* 初始置中 */
+            transform: translate(-50%, -50%);
             height: 320px; 
             width: 0px;    
             display: flex; flex-direction: row; 
             align-items: center;
             transition: all 1s cubic-bezier(0.25, 1, 0.5, 1);
             pointer-events: auto;
+            z-index: 9999; /* 最高層級 */
         }
 
         .scroll-handle {
@@ -66,14 +70,13 @@
         .scroll-container.open { width: 700px; } 
         .scroll-container.open .scroll-body { width: 100%; }
 
-        /* === 縮小收回狀態 === */
+        /* === 縮小收回狀態 (精準對齊) === */
         .scroll-container.minimized {
-            position: fixed;
-            top: 15px; left: 15px; 
-            width: 290px !important; 
-            height: 160px; 
-            transform: none !important;
-            z-index: 50;
+            top: 15px !important; 
+            left: 15px !important; 
+            transform: translate(0, 0) !important; /* 移除置中偏移 */
+            width: 290px !important; /* 對齊 Sidebar 寬度 */
+            height: 160px !important; 
         }
         
         .scroll-container.minimized .scroll-handle { height: 100%; width: 10px; } 
@@ -88,7 +91,7 @@
             border-width: 2px;
         }
 
-        /* 內容排版 */
+        /* 內容排版優化 */
         .scroll-content { 
             opacity: 0; transition: opacity 0.5s 0.8s; width: 80%; 
             white-space: nowrap; 
@@ -127,7 +130,7 @@
             width: 320px; background: white; padding: 15px; 
             display: flex; flex-direction: column; border-right: 2px solid #E0E0E0; 
             z-index: 10; box-shadow: 4px 0 15px rgba(0,0,0,0.05);
-            padding-top: 190px; 
+            padding-top: 190px; /* 預留上方空間給卷軸 */
             position: relative; box-sizing: border-box; 
         }
 
@@ -217,22 +220,20 @@
 </head>
 <body>
 
-    <div id="mission-overlay" class="mission-overlay">
-        <div id="scroll-container" class="scroll-container">
-            <div class="scroll-handle left"></div>
-            <div class="scroll-body">
-                <div class="scroll-content">
-                    <div class="scroll-title">📜 今天的挑戰：跳跳貓</div>
-                    <ul class="scroll-list">
-                        <li>按下空白鍵</li>
-                        <li>往上跳 (Y + 100)</li>
-                        <li>等待一下 (0.5 秒)</li>
-                        <li>掉下來 (Y - 100)</li>
-                    </ul>
-                </div>
+    <div id="mission-overlay" class="mission-overlay"></div> <div id="scroll-container" class="scroll-container">
+        <div class="scroll-handle left"></div>
+        <div class="scroll-body">
+            <div class="scroll-content">
+                <div class="scroll-title">📜 今天的挑戰：跳跳貓</div>
+                <ul class="scroll-list">
+                    <li>按下空白鍵</li>
+                    <li>往上跳 (Y + 100)</li>
+                    <li>等待一下 (0.5 秒)</li>
+                    <li>掉下來 (Y - 100)</li>
+                </ul>
             </div>
-            <div class="scroll-handle right"></div>
         </div>
+        <div class="scroll-handle right"></div>
     </div>
 
     <div id="empathy-modal" class="empathy-modal">
@@ -304,7 +305,7 @@
     <canvas id="capture-canvas"></canvas>
 
     <script>
-        const API_KEY = "AIzaSyCPfiqr1KWhnCVT-X9MZeh3KOE2CAu3fcY"; // ★★★ 請務必填入您的 API Key ★★★
+        const API_KEY = "AIzaSyC6j2Av7HBAHtagra09-GiVOigUWeZkMxs"; // ★★★ 請務必填入您的 API Key ★★★
         
         const TA_SYSTEM_PROMPT = `
         你是 Scratch 積木大師。對象是小學高年級。
@@ -321,7 +322,7 @@
             isInterventionActive: false,
             clickCount: 0, keyPressCount: 0, mousePositions: [],
             dominantStressor: '',
-            offTopicCount: 0,       // ★★★ 新增：分心計數器 ★★★
+            offTopicCount: 0,       // 分心計數器
             empathyChatHistory: [], 
             taChatHistory: []       
         };
@@ -336,18 +337,17 @@
             setTimeout(() => { scroll.classList.add('open'); }, 300);
             initSystem();
 
-            // ★ 修改：3秒後直接縮小並移除背景，不等待
+            // 3秒後直接縮小並移除背景，不等待
             setTimeout(() => {
-                overlay.style.opacity = '0';
+                overlay.style.opacity = '0'; // 背景淡出
                 scroll.classList.remove('open');
                 scroll.classList.add('minimized');
-                // 等待淡出動畫結束後完全移除
-                setTimeout(() => { overlay.style.display = 'none'; }, 500);
+                setTimeout(() => { overlay.style.display = 'none'; }, 500); // 移除元素
             }, 3300); 
         };
 
         // ==========================================
-        // 1. 行為偵測
+        // 1. 行為偵測 (含輸入框過濾)
         // ==========================================
         document.addEventListener('mousemove', (e) => {
             const now = Date.now();
@@ -443,7 +443,7 @@
                 
                 updateMetricColor('score-face', state.faceScore);
 
-                // ★★★ 修改：壓力判定邏輯改為 OR (取最大值) ★★★
+                // ★★★ 修正：嚴格使用 MAX 邏輯，只要有一個飆高，總壓力就飆高 ★★★
                 state.stress = Math.max(state.faceScore, state.mouseScore, state.keyScore);
                 
                 // 找出主導壓力源
@@ -477,7 +477,7 @@
 
             let openingMsg = "";
             
-            // ★★★ 新增：分心/閒聊的特殊開場白 ★★★
+            // ★★★ 特殊情境：分心/閒聊/搗蛋 ★★★
             if (reason === 'BOREDOM') {
                 openingMsg = "嘿！我發現我們好像聊開了～😆 <br>雖然聊天很開心，但我是不是讓你覺得寫程式有點無聊？<br>其實學會這個，你可以做超酷的遊戲給朋友玩喔！要不要試試看？";
             } else {
@@ -512,17 +512,17 @@
             const val = input.value.trim();
             if(!val) return;
             
+            // 暖心模式也要偵測
             const analysis = analyzeTextForStress(val);
             if (analysis === 'OFF_TOPIC') {
                 state.offTopicCount++;
                 if(state.offTopicCount >= 3) {
-                    // 如果在暖心模式還一直亂聊，可以用更幽默的方式拉回
                     addEmpathyMsg('warm', "看來你真的很不想寫程式吼 😂 好啦，我們再給積木大師一次機會，做完這個我們就休息！");
                     input.value = "";
                     return;
                 }
             } else {
-                state.offTopicCount = 0; // 恢復正常對話則重置
+                state.offTopicCount = 0; 
             }
 
             addEmpathyMsg('user', val);
@@ -559,7 +559,7 @@
 
         function closeEmpathy() {
             document.getElementById('empathy-modal').style.display = 'none';
-            state.offTopicCount = 0; // 重置計數器
+            state.offTopicCount = 0; 
             setTimeout(() => { state.isInterventionActive = false; }, 5000);
         }
 
@@ -567,13 +567,13 @@
             document.getElementById('empathy-modal').style.display = 'none';
             const taBox = document.getElementById('ta-chat');
             taBox.innerHTML += `<div class="msg system">✨ 暖心夥伴已通知積木大師...</div>`;
-            state.offTopicCount = 0; // 重置計數器
+            state.offTopicCount = 0; 
             captureAndAnalyze('TA_STRESSED_' + state.dominantStressor);
             setTimeout(() => { state.isInterventionActive = false; }, 5000);
         }
 
         // ==========================================
-        // ★★★ 文字分析函式 (壓力 + 閒聊) ★★★
+        // ★★★ 全方位文字分析 (含強制觸發) ★★★
         // ==========================================
         function analyzeTextForStress(text) {
             // 1. 壓力/負面偵測
@@ -586,8 +586,7 @@
 
             // 2. 閒聊/無意義偵測
             const chattyPattern = /幾歲|住哪|叫什麼|無聊|你好|哈囉|hi|hello|age|name|誰|笨蛋|機器人/;
-            // 或是純符號/太短的敷衍
-            const nonsensePattern = /^[\.。,，\?？!！]{2,}$|^.{0,2}$/; 
+            const nonsensePattern = /^[\.。,，\?？!！]{2,}$|^.{0,2}$/; // 太短或純符號
             
             if (chattyPattern.test(text) || nonsensePattern.test(text)) {
                 return 'OFF_TOPIC';
@@ -595,10 +594,6 @@
 
             return 'NORMAL';
         }
-
-        // ==========================================
-        // ★★★ 積木大師 AI 邏輯 ★★★
-        // ==========================================
 
         async function sendToGeminiTA() {
             const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${API_KEY}`;
@@ -611,10 +606,7 @@
                 });
                 const data = await res.json();
                 
-                if(data.error) {
-                    console.error("API Error Detail:", data.error);
-                    throw new Error(data.error.message);
-                }
+                if(data.error) throw new Error(data.error.message);
 
                 const reply = data.candidates[0].content.parts[0].text;
                 taBox.innerHTML += `<div class="msg ai">${marked.parse(reply)}</div>`;
@@ -626,7 +618,6 @@
                 });
 
             } catch(e) {
-                console.error("Gemini Connection Error:", e);
                 taBox.innerHTML += `<div class="msg ai">連線發生錯誤，請稍後再試。</div>`;
                 state.taChatHistory.pop();
             }
@@ -637,21 +628,24 @@
             const val = input.value.trim();
             if(!val) return;
             
-            // ★★★ 執行分析 ★★★
+            // ★★★ 關鍵修正：先分析，如果連續3次閒聊，強制觸發暖心夥伴並中斷 ★★★
             const analysis = analyzeTextForStress(val);
             
             if (analysis === 'OFF_TOPIC') {
                 state.offTopicCount++;
                 console.log("偵測到閒聊/分心，次數：", state.offTopicCount);
                 
-                // 連續 3 次分心，觸發暖心夥伴
                 if (state.offTopicCount >= 3) {
-                    triggerEmpathyAI('BOREDOM'); 
+                    // 清空輸入框
                     input.value = "";
-                    return; // 中斷發送給積木大師，直接跳轉
+                    // 觸發暖心夥伴 (Boredom 模式)
+                    triggerEmpathyAI('BOREDOM'); 
+                    // ★★★ 重要：直接 return，不呼叫 Gemini TA ★★★
+                    return; 
                 }
             } else {
-                state.offTopicCount = 0; // 正常對話則歸零
+                // 如果講話正常，重置計數器
+                state.offTopicCount = 0; 
             }
 
             const taBox = document.getElementById('ta-chat');

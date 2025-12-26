@@ -2,7 +2,7 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <title>Scratch 實驗室 (精準對齊版)</title>
+    <title>Scratch 實驗室 (全方位偵測版)</title>
     
     <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
@@ -27,7 +27,7 @@
 
         .scroll-container {
             position: relative;
-            height: 320px; /* 展開時的高度 */
+            height: 320px; 
             width: 0px;    
             display: flex; flex-direction: row; 
             align-items: center;
@@ -65,11 +65,10 @@
         .scroll-container.open { width: 700px; } 
         .scroll-container.open .scroll-body { width: 100%; }
 
-        /* === 縮小收回狀態 (精準對齊) === */
+        /* === 縮小收回狀態 === */
         .scroll-container.minimized {
             position: fixed;
-            top: 15px; left: 15px; /* 對齊 Sidebar padding */
-            /* ★ 關鍵：Sidebar 320px - Padding 30px = 290px */
+            top: 15px; left: 15px; 
             width: 290px !important; 
             height: 160px; 
             transform: none !important;
@@ -82,7 +81,7 @@
         
         .scroll-container.minimized .scroll-body {
             width: 100%;
-            align-items: flex-start; /* 縮小後靠左對齊 */
+            align-items: flex-start; 
             padding: 10px;
             background: #FFFDE7; 
             border-width: 2px;
@@ -127,8 +126,8 @@
             width: 320px; background: white; padding: 15px; 
             display: flex; flex-direction: column; border-right: 2px solid #E0E0E0; 
             z-index: 10; box-shadow: 4px 0 15px rgba(0,0,0,0.05);
-            padding-top: 190px; /* 預留上方空間 */
-            position: relative; box-sizing: border-box; /* 確保寬度包含 padding */
+            padding-top: 190px; 
+            position: relative; box-sizing: border-box; 
         }
 
         .cam-wrapper {
@@ -257,8 +256,6 @@
     </div>
 
     <div class="sidebar">
-        <h3 style="margin:0 0 10px 0; color:#444;">🧩 Scratch 實驗室</h3>
-        
         <div class="cam-wrapper">
             <video id="video" autoplay muted playsinline></video>
             <div id="cam-error" class="cam-placeholder">
@@ -306,7 +303,7 @@
     <canvas id="capture-canvas"></canvas>
 
     <script>
-        const API_KEY = "AIzaSyBXZ7enyD8BdWbuE7lR8V_Akj1KFKucYl0"; // ★★★ 請務必填入您的 API Key ★★★
+        const API_KEY = "AIzaSyC6j2Av7HBAHtagra09-GiVOigUWeZkMxs"; // ★★★ 請務必填入您的 API Key ★★★
         
         const TA_SYSTEM_PROMPT = `
         你是 Scratch 積木大師。對象是小學高年級。
@@ -363,7 +360,7 @@
             }
         });
         
-        // ★★★ 修正：如果是對話框，不計入 Key Press ★★★
+        // ★★★ 如果是對話框，不計入 Key Press ★★★
         document.addEventListener('keydown', (e) => { 
             if(e.target.tagName === 'INPUT' && (e.target.id === 'ta-input' || e.target.id === 'emp-input')) return;
             state.keyPressCount++; 
@@ -500,11 +497,15 @@
             });
         }
 
+        // ★★★ 暖心夥伴也要偵測負面用語 ★★★
         async function sendEmpathyChat() {
             const input = document.getElementById('emp-input');
             const val = input.value.trim();
             if(!val) return;
             
+            // 偵測是否為無效/負面輸入
+            analyzeTextForStress(val);
+
             addEmpathyMsg('user', val);
             input.value = "";
 
@@ -551,11 +552,11 @@
         }
 
         // ==========================================
-        // ★★★ 積木大師 AI + 亂碼分析邏輯 ★★★
+        // ★★★ 積木大師 AI + 關鍵字壓力分析 ★★★
         // ==========================================
 
         async function sendToGeminiTA() {
-            const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${API_KEY}`;
+            const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${API_KEY}`;
             const taBox = document.getElementById('ta-chat');
 
             try {
@@ -586,18 +587,28 @@
             }
         }
 
-        // ★★★ 亂碼/無意義內容偵測 ★★★
+        // ★★★ 全方位文字壓力偵測函式 ★★★
         function analyzeTextForStress(text) {
-            // 邏輯1: 連續重複字元 (例如 aaaaaa, !!!!!)
-            const repeatPattern = /(.)\1{4,}/;
-            // 邏輯2: 過長的無空格英數字串 (例如 asdfghjkl)
-            const longString = /^[a-zA-Z0-9]{15,}$/;
-            
-            if (repeatPattern.test(text) || (longString.test(text) && !text.includes(' '))) {
-                // 觸發：瞬間拉高鍵盤壓力
-                state.keyScore = Math.min(100, state.keyScore + 40);
+            let isStressful = false;
+
+            // 1. 偵測連續重複字元 (如 aaaaa, !!!!!)
+            if (/(.)\1{4,}/.test(text)) isStressful = true;
+
+            // 2. 偵測過長無空格字串 (亂碼)
+            if (/^[a-zA-Z0-9]{15,}$/.test(text) && !text.includes(' ')) isStressful = true;
+
+            // 3. 偵測負面/情緒性/無關學習關鍵字
+            const badWords = /煩|討厭|爛|笨|死|不會|難|哭|靠|媽的|機車|滾|醜|隨便|無聊|白癡|智障|幹/;
+            if (badWords.test(text)) isStressful = true;
+
+            // 4. 偵測敷衍符號 (如 ... 或 。。。)
+            if (/^[\.。,，]{2,}$/.test(text)) isStressful = true;
+
+            if (isStressful) {
+                // 懲罰機制：鍵盤壓力指數瞬間 +30%
+                state.keyScore = Math.min(100, state.keyScore + 30);
                 updateMetricColor('score-key', state.keyScore);
-                console.log("偵測到無意義打字，視為壓力釋放");
+                console.log("偵測到壓力/負面輸入，已增加壓力指數。");
                 return true;
             }
             return false;
@@ -608,7 +619,7 @@
             const val = input.value.trim();
             if(!val) return;
             
-            // 先進行壓力分析
+            // ★★★ 積木大師也要執行壓力偵測 ★★★
             analyzeTextForStress(val);
 
             const taBox = document.getElementById('ta-chat');

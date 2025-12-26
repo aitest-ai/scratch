@@ -2,7 +2,7 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <title>Scratch 實驗室 (AI引導版)</title>
+    <title>Scratch 實驗室 (GAS 安全版)</title>
     
     <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
@@ -35,7 +35,7 @@
             align-items: center;
             transition: all 1s cubic-bezier(0.25, 1, 0.5, 1);
             pointer-events: auto;
-            z-index: 10000; 
+            z-index: 10000; /* 比遮罩高，比暖心夥伴低 */
         }
 
         .scroll-handle {
@@ -64,9 +64,11 @@
             background-size: 20px 100%;
         }
 
+        /* === 展開狀態 === */
         .scroll-container.open { width: 700px; } 
         .scroll-container.open .scroll-body { width: 100%; }
 
+        /* === 縮小收回狀態 (精準對齊 Sidebar) === */
         .scroll-container.minimized {
             top: 15px !important; 
             left: 15px !important; 
@@ -125,7 +127,7 @@
             width: 320px; background: white; padding: 15px; 
             display: flex; flex-direction: column; border-right: 2px solid #E0E0E0; 
             z-index: 10; box-shadow: 4px 0 15px rgba(0,0,0,0.05);
-            padding-top: 190px; 
+            padding-top: 190px; /* 預留上方空間給卷軸 */
             position: relative; box-sizing: border-box; 
         }
 
@@ -186,12 +188,13 @@
         .msg.system { background: #FFF3E0; color: #E65100; text-align: center; font-size: 0.9em; border: 1px solid #FFE0B2; align-self: center; width: 90%; border-radius: 10px; }
 
         /* ========================
-           4. 暖心 AI 彈窗
+           4. 暖心 AI 彈窗 (層級最高)
            ======================== */
         .empathy-modal {
             position: fixed; top: 0; left: 0; width: 100%; height: 100%;
             background: rgba(255, 255, 255, 0.85); 
-            z-index: 9999; display: none;
+            z-index: 20000; /* 最高層級，蓋住卷軸 */
+            display: none;
             justify-content: center; align-items: center; backdrop-filter: blur(5px);
         }
         .empathy-box {
@@ -302,9 +305,9 @@
     <canvas id="capture-canvas"></canvas>
 
     <script>
-        const API_KEY = "AIzaSyC6j2Av7HBAHtagra09-GiVOigUWeZkMxs"; // ★★★ 請務必填入您的 API Key ★★★
+        // ★★★ 請在此處填入您的 GAS 部署網址 ★★★
+        const GAS_URL = "https://script.google.com/macros/s/AKfycbzJpobTeEyfpB85AcYhINpl-4gA3ubLiXmI185COXN508SgTtCm838aH8agSyZNg9XH/exec"; 
         
-        // ★★★ 修正提示詞：教導 AI 如何應對亂碼/閒聊 ★★★
         const TA_SYSTEM_PROMPT = `
         你是 Scratch 積木大師。對象是小學高年級。
         **核心規則：**
@@ -312,7 +315,9 @@
         2. **一步一步來**：每次回答只能專注於這一步，不要跳到下一步。
         3. **短回答**：每次回答請控制在 50 字以內，簡單易懂。
         4. **提問引導**：每講完一個觀念，請用問句結尾，確認學生懂了才繼續。
-        5. **應對亂碼或閒聊**：如果學生輸入無意義的亂碼（如 asdf, 1234）、純符號、或與程式無關的閒聊（如幾歲、住哪），請不要跟著閒聊。請溫柔但堅定地說：「我們現在先專注在跳跳貓的任務好嗎？」或是「這個我不太懂耶，但如果你問我積木的問題，我很厲害喔！」
+        5. **應對亂碼或閒聊**：
+           - 如果學生輸入亂碼（如 asdf）或符號，請用幽默的方式（例如說那是外星語）請他專注。
+           - **絕對不要**跟著學生閒聊。
         注意：如果使用者傳送了圖片，那是 Scratch 畫面的「放大裁切」截圖，請專注於檢查程式邏輯是否符合跳跳貓任務(空白鍵->Y+100->等待->Y-100)。
         `;
 
@@ -326,27 +331,20 @@
             taChatHistory: []       
         };
 
-        // ==========================================
-        // 0. 開場動畫邏輯
-        // ==========================================
         window.onload = function() {
             const scroll = document.getElementById('scroll-container');
             const overlay = document.getElementById('mission-overlay');
-            
             setTimeout(() => { scroll.classList.add('open'); }, 300);
             initSystem();
-
             setTimeout(() => {
-                overlay.style.opacity = '0'; // 背景淡出
+                overlay.style.opacity = '0';
                 scroll.classList.remove('open');
                 scroll.classList.add('minimized');
                 setTimeout(() => { overlay.style.display = 'none'; }, 500); 
             }, 3300); 
         };
 
-        // ==========================================
-        // 1. 行為偵測 (含輸入框過濾)
-        // ==========================================
+        // 行為偵測
         document.addEventListener('mousemove', (e) => {
             const now = Date.now();
             state.mousePositions.push({x: e.clientX, y: e.clientY, t: now});
@@ -358,7 +356,8 @@
                     const p2 = state.mousePositions[i];
                     dist += Math.sqrt(Math.pow(p2.x-p1.x, 2) + Math.pow(p2.y-p1.y, 2));
                 }
-                if(dist > 2000) state.mouseScore = Math.min(100, state.mouseScore + 10);
+                // 提高靈敏度
+                if(dist > 1000) state.mouseScore = Math.min(100, state.mouseScore + 15);
                 else state.mouseScore = Math.max(0, state.mouseScore - 5); 
             }
         });
@@ -372,7 +371,6 @@
 
         setInterval(() => {
             if(state.clickCount > 3) state.mouseScore = Math.min(100, state.mouseScore + 20);
-            
             if(state.keyPressCount > 5) state.keyScore = Math.min(100, state.keyScore + 20);
             else state.keyScore = Math.max(0, state.keyScore - 5);
 
@@ -406,25 +404,19 @@
             if(score > 50) el.classList.add('high-stress'); else el.classList.remove('high-stress');
         }
 
-        // ==========================================
-        // 2. 初始化與相機
-        // ==========================================
         async function initSystem() {
             const video = document.getElementById('video');
             const errorMsg = document.getElementById('cam-error');
             const emoVal = document.getElementById('emo-val');
-
             try {
                 errorMsg.style.display = 'none';
                 emoVal.innerText = "偵測中...";
                 const stream = await navigator.mediaDevices.getUserMedia({ video: true });
                 video.srcObject = stream;
                 video.onloadedmetadata = () => { video.play(); };
-
                 await faceapi.nets.tinyFaceDetector.loadFromUri('https://justadudewhohacks.github.io/face-api.js/models');
                 await faceapi.nets.faceExpressionNet.loadFromUri('https://justadudewhohacks.github.io/face-api.js/models');
                 startFaceLoop();
-
             } catch(e) {
                 console.error(e);
                 errorMsg.style.display = 'block';
@@ -435,20 +427,16 @@
         function startFaceLoop() {
             const video = document.getElementById('video');
             const emoVal = document.getElementById('emo-val');
-            
             setInterval(async () => {
                 if(video.paused || video.ended || state.isInterventionActive) return;
-
                 const options = new faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.5 });
                 const dets = await faceapi.detectAllFaces(video, options).withFaceExpressions();
-                
                 if(dets.length > 0) {
                     const exps = dets[0].expressions;
                     const top = Object.keys(exps).reduce((a,b)=>exps[a]>exps[b]?a:b);
                     const map = {neutral:"平靜 🙂", happy:"開心 😄", sad:"難過 😢", angry:"生氣 😠", fearful:"害怕 😨", disgusted:"討厭 😖", surprised:"驚訝 😲"};
                     emoVal.innerText = map[top] || top;
                     emoVal.style.color = "#fff";
-
                     if(['sad', 'angry', 'fearful', 'disgusted'].includes(top)) state.faceScore = Math.min(100, state.faceScore + 10); 
                     else if(top === 'happy') state.faceScore = Math.max(0, state.faceScore - 10); 
                     else state.faceScore = Math.max(0, state.faceScore - 2); 
@@ -460,7 +448,7 @@
         }
 
         // ==========================================
-        // 3. 全方位文字分析
+        // ★★★ 嚴格亂碼/無意義偵測 ★★★
         // ==========================================
         function analyzeTextForStress(text) {
             const gibberish = /(.)\1{2,}|asdf|qwer|zxcv|1234|uiop|hjkl/i;
@@ -483,7 +471,7 @@
         }
 
         // ==========================================
-        // 4. 訊息發送邏輯 (修正：允許前兩次發送)
+        // 4. 訊息發送邏輯 (第3次強制攔截)
         // ==========================================
         async function sendTextChat() {
             const input = document.getElementById('ta-input');
@@ -499,14 +487,16 @@
             
             if (analysis !== 'NORMAL') {
                 state.offTopicCount++;
-                console.log(`異常輸入 (${analysis})，次數：${state.offTopicCount}`);
+                console.log(`異常偵測 (${analysis}) 次數：${state.offTopicCount}`);
                 
-                // ★★★ 第3次才攔截 ★★★
+                // ★★★ 第 3 次：強制攔截，不呼叫 API ★★★
                 if (state.offTopicCount >= 3) {
+                    taBox.innerHTML += `<div class="msg system" style="color:red;">[系統] 偵測到學習中斷，正在呼叫暖心夥伴...</div>`;
+                    taBox.scrollTop = taBox.scrollHeight;
                     triggerEmpathyAI('BOREDOM'); 
-                    return; 
+                    return; // 終止函式
                 }
-                // 第1、2次：繼續執行，讓 Gemini 回應
+                // ★★★ 第 1-2 次：繼續執行，讓 Gemini 根據 Prompt 回應 ★★★
             } else {
                 state.offTopicCount = 0; 
             }
@@ -517,12 +507,11 @@
             }
 
             state.taChatHistory.push({ role: 'user', parts: [{ text: messageText }] });
-            await sendToGeminiTA();
+            
+            // ★★★ 呼叫 GAS (請填入正確網址) ★★★
+            await sendToGAS(state.taChatHistory, 'TA');
         }
 
-        // ==========================================
-        // 5. 暖心 AI
-        // ==========================================
         function triggerEmpathyAI(reason) {
             state.isInterventionActive = true;
             state.faceScore = 50; state.mouseScore = 0; state.keyScore = 0;
@@ -533,7 +522,6 @@
             chatBox.innerHTML = ''; 
 
             let openingMsg = "";
-            
             if (reason === 'BOREDOM') {
                 openingMsg = "嘿！我發現我們好像聊開了～😆 <br>雖然聊天很開心，但我是不是讓你覺得寫程式有點無聊？<br>其實學會這個，你可以做超酷的遊戲給朋友玩喔！要不要試試看？";
             } else {
@@ -578,30 +566,17 @@
             addEmpathyMsg('user', val);
             input.value = "";
 
-            const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${API_KEY}`;
             const prompt = `
             你是一個「暖心夥伴」。使用者是小學高年級學生。
             目標：
             1. 如果學生在發洩情緒，請同理並安撫。
-            2. 如果學生覺得無聊或在閒聊，請用幽默風趣的方式，告訴他學會 Scratch 可以做很多很酷的事情（例如做動畫送給朋友、做遊戲），引導他回到學習。
-            3. 語氣要像好朋友，不要像老師說教。
+            2. 如果學生覺得無聊或在閒聊，請用幽默風趣的方式，告訴他學會 Scratch 可以做很多很酷的事情。
             `;
 
-            const payload = {
-                contents: [ { role: 'user', parts: [{ text: prompt }] }, ...state.empathyChatHistory ]
-            };
-
-            try {
-                const res = await fetch(url, {
-                    method: 'POST', headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify(payload)
-                });
-                const data = await res.json();
-                const reply = data.candidates[0].content.parts[0].text;
-                addEmpathyMsg('warm', marked.parse(reply));
-            } catch(e) {
-                addEmpathyMsg('warm', "網路有點卡卡的，但我還是在這裡陪你喔。");
-            }
+            const history = [ { role: 'user', parts: [{ text: prompt }] }, ...state.empathyChatHistory ];
+            
+            // ★★★ 呼叫 GAS ★★★
+            await sendToGAS(history, 'EMPATHY');
         }
 
         function closeEmpathy() {
@@ -619,29 +594,41 @@
             setTimeout(() => { state.isInterventionActive = false; }, 5000);
         }
 
-        async function sendToGeminiTA() {
-            const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${API_KEY}`;
-            const taBox = document.getElementById('ta-chat');
+        // ==========================================
+        // ★★★ GAS 請求發送 (共用) ★★★
+        // ==========================================
+        async function sendToGAS(history, type) {
+            const payload = { contents: history };
 
             try {
-                const res = await fetch(url, {
-                    method: 'POST', headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ contents: state.taChatHistory })
+                const res = await fetch(GAS_URL, {
+                    method: 'POST', 
+                    body: JSON.stringify(payload)
                 });
+                
                 const data = await res.json();
                 
                 if(data.error) throw new Error(data.error.message);
 
                 const reply = data.candidates[0].content.parts[0].text;
-                taBox.innerHTML += `<div class="msg ai">${marked.parse(reply)}</div>`;
-                taBox.scrollTop = taBox.scrollHeight;
-
-                state.taChatHistory.push({ role: 'model', parts: [{ text: reply }] });
+                
+                if (type === 'TA') {
+                    const taBox = document.getElementById('ta-chat');
+                    taBox.innerHTML += `<div class="msg ai">${marked.parse(reply)}</div>`;
+                    taBox.scrollTop = taBox.scrollHeight;
+                    state.taChatHistory.push({ role: 'model', parts: [{ text: reply }] });
+                } else {
+                    addEmpathyMsg('warm', marked.parse(reply));
+                }
 
             } catch(e) {
-                console.error("Gemini Connection Error:", e);
-                taBox.innerHTML += `<div class="msg ai">連線發生錯誤，請稍後再試。</div>`;
-                state.taChatHistory.pop();
+                console.error("GAS Error:", e);
+                if (type === 'TA') {
+                    document.getElementById('ta-chat').innerHTML += `<div class="msg ai">連線發生錯誤。</div>`;
+                    state.taChatHistory.pop();
+                } else {
+                    addEmpathyMsg('warm', "網路有點卡卡的...");
+                }
             }
         }
 
@@ -660,7 +647,6 @@
                 
                 const videoEl = document.getElementById('capture-video');
                 videoEl.srcObject = stream;
-                
                 await new Promise(r => videoEl.onloadedmetadata = r);
                 videoEl.play();
                 await new Promise(r => setTimeout(r, 500)); 
@@ -668,7 +654,6 @@
                 const canvas = document.getElementById('capture-canvas');
                 const w = videoEl.videoWidth;
                 const h = videoEl.videoHeight;
-                
                 const cropX = w * 0.20; const cropY = h * 0.10; 
                 const cropW = w * 0.45; const cropH = h * 0.80; 
 
@@ -699,7 +684,7 @@
                     parts: [ { text: userPrompt }, { inline_data: { mime_type: "image/jpeg", data: cleanBase64 } } ]
                 });
 
-                await sendToGeminiTA();
+                await sendToGAS(state.taChatHistory, 'TA');
 
             } catch(e) {
                 console.error(e);

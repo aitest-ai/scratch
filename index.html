@@ -2,7 +2,7 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <title>Scratch 實驗室 (完美整合版)</title>
+    <title>Scratch 實驗室 (AI引導版)</title>
     
     <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
@@ -15,9 +15,8 @@
         body { margin: 0; display: flex; height: 100vh; font-family: "Microsoft JhengHei", sans-serif; background: var(--bg); overflow: hidden; }
 
         /* ========================
-           1. 橫向卷軸動畫系統 (修復消失問題)
+           1. 橫向卷軸動畫系統
            ======================== */
-        /* 遮罩層 */
         .mission-overlay {
             position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
             background: rgba(0,0,0,0.7); z-index: 9000; 
@@ -26,7 +25,6 @@
             pointer-events: none; 
         }
 
-        /* 卷軸本體 */
         .scroll-container {
             position: fixed; 
             top: 50%; left: 50%; 
@@ -37,7 +35,7 @@
             align-items: center;
             transition: all 1s cubic-bezier(0.25, 1, 0.5, 1);
             pointer-events: auto;
-            z-index: 10000; /* ★★★ 確保最高層級，不會被 Sidebar 蓋住 ★★★ */
+            z-index: 10000; 
         }
 
         .scroll-handle {
@@ -66,16 +64,14 @@
             background-size: 20px 100%;
         }
 
-        /* === 展開狀態 === */
         .scroll-container.open { width: 700px; } 
         .scroll-container.open .scroll-body { width: 100%; }
 
-        /* === 縮小收回狀態 (精準對齊 Sidebar) === */
         .scroll-container.minimized {
             top: 15px !important; 
             left: 15px !important; 
             transform: translate(0, 0) !important;
-            width: 290px !important; /* Sidebar 320 - padding 30 */
+            width: 290px !important; 
             height: 160px !important; 
         }
         
@@ -87,11 +83,10 @@
             width: 100%;
             align-items: flex-start; 
             padding: 10px;
-            background: #FFFDE7; /* 確保有背景色 */
+            background: #FFFDE7; 
             border-width: 2px;
         }
 
-        /* 內容排版 */
         .scroll-content { 
             opacity: 0; transition: opacity 0.5s 0.8s; width: 80%; 
             white-space: nowrap; 
@@ -130,7 +125,7 @@
             width: 320px; background: white; padding: 15px; 
             display: flex; flex-direction: column; border-right: 2px solid #E0E0E0; 
             z-index: 10; box-shadow: 4px 0 15px rgba(0,0,0,0.05);
-            padding-top: 190px; /* 預留上方空間給卷軸 */
+            padding-top: 190px; 
             position: relative; box-sizing: border-box; 
         }
 
@@ -309,6 +304,7 @@
     <script>
         const API_KEY = "AIzaSyC6j2Av7HBAHtagra09-GiVOigUWeZkMxs"; // ★★★ 請務必填入您的 API Key ★★★
         
+        // ★★★ 修正提示詞：教導 AI 如何應對亂碼/閒聊 ★★★
         const TA_SYSTEM_PROMPT = `
         你是 Scratch 積木大師。對象是小學高年級。
         **核心規則：**
@@ -316,6 +312,7 @@
         2. **一步一步來**：每次回答只能專注於這一步，不要跳到下一步。
         3. **短回答**：每次回答請控制在 50 字以內，簡單易懂。
         4. **提問引導**：每講完一個觀念，請用問句結尾，確認學生懂了才繼續。
+        5. **應對亂碼或閒聊**：如果學生輸入無意義的亂碼（如 asdf, 1234）、純符號、或與程式無關的閒聊（如幾歲、住哪），請不要跟著閒聊。請溫柔但堅定地說：「我們現在先專注在跳跳貓的任務好嗎？」或是「這個我不太懂耶，但如果你問我積木的問題，我很厲害喔！」
         注意：如果使用者傳送了圖片，那是 Scratch 畫面的「放大裁切」截圖，請專注於檢查程式邏輯是否符合跳跳貓任務(空白鍵->Y+100->等待->Y-100)。
         `;
 
@@ -340,7 +337,7 @@
             initSystem();
 
             setTimeout(() => {
-                overlay.style.opacity = '0';
+                overlay.style.opacity = '0'; // 背景淡出
                 scroll.classList.remove('open');
                 scroll.classList.add('minimized');
                 setTimeout(() => { overlay.style.display = 'none'; }, 500); 
@@ -373,25 +370,24 @@
         
         document.addEventListener('mousedown', () => { state.clickCount++; });
 
-        // ★★★ 核心迴圈：0.5秒更新一次壓力，確保同步 ★★★
         setInterval(() => {
-            // 1. 計算輸入衰退/增加
             if(state.clickCount > 3) state.mouseScore = Math.min(100, state.mouseScore + 20);
+            
             if(state.keyPressCount > 5) state.keyScore = Math.min(100, state.keyScore + 20);
             else state.keyScore = Math.max(0, state.keyScore - 5);
 
             state.clickCount = 0; state.keyPressCount = 0;
             
-            // 2. 更新子數值 UI
             updateMetricColor('score-mouse', state.mouseScore);
             updateMetricColor('score-key', state.keyScore);
-            updateMetricColor('score-face', state.faceScore); 
+            updateMetricColor('score-face', state.faceScore);
 
-            // 3. ★★★ 總壓力計算 (OR Gate: 取最大值) ★★★
-            // 這確保只要有一個數值高，總壓力就高
             state.stress = Math.max(state.faceScore, state.mouseScore, state.keyScore);
             
-            // 4. 更新總壓力條 UI
+            if (state.stress === state.faceScore) state.dominantStressor = 'FACE';
+            else if (state.stress === state.mouseScore) state.dominantStressor = 'MOUSE';
+            else state.dominantStressor = 'KEY';
+
             document.getElementById('stress-val').innerText = state.stress + "%";
             const bar = document.getElementById('stress-bar');
             bar.style.width = state.stress + "%";
@@ -400,17 +396,9 @@
             else if(state.stress < 80) document.getElementById('stress-bar').style.background = "#FFAB19";
             else document.getElementById('stress-bar').style.background = "#FF6B6B";
 
-            // 5. 判斷主導壓力源
-            if (state.stress === state.faceScore) state.dominantStressor = 'FACE';
-            else if (state.stress === state.mouseScore) state.dominantStressor = 'MOUSE';
-            else state.dominantStressor = 'KEY';
+            if(state.stress > 80) triggerEmpathyAI(state.dominantStressor);
 
-            // 6. 觸發介入
-            if(state.stress > 80 && !state.isInterventionActive) {
-                triggerEmpathyAI(state.dominantStressor);
-            }
-
-        }, 500); // 改為 0.5 秒，反應更靈敏
+        }, 500); 
 
         function updateMetricColor(id, score) {
             const el = document.getElementById(id);
@@ -468,69 +456,61 @@
                     emoVal.innerText = "👀";
                     emoVal.style.color = "#FFD54F";
                 }
-            }, 1000); // 臉部偵測維持 1秒
+            }, 1000); 
         }
 
         // ==========================================
-        // 3. 全方位文字分析 (判定與計數修復)
+        // 3. 全方位文字分析
         // ==========================================
         function analyzeTextForStress(text) {
-            // 1. 嚴格亂碼偵測 (新增 1234, asdf, 連續字元)
-            // 只要有連續3個重複字元，或常見鍵盤序列
             const gibberish = /(.)\1{2,}|asdf|qwer|zxcv|1234|uiop|hjkl/i;
-            
-            // 2. 負面/情緒關鍵字
             const badWords = /煩|討厭|爛|笨|死|不會|難|哭|靠|媽的|機車|滾|醜|白癡|智障|幹/;
 
             if (gibberish.test(text) || badWords.test(text)) {
-                // 懲罰機制：鍵盤壓力瞬間 +30%
                 state.keyScore = Math.min(100, state.keyScore + 30);
-                return 'STRESS'; // 視為壓力/搗蛋
+                updateMetricColor('score-key', state.keyScore);
+                return 'STRESS'; 
             }
 
-            // 3. 閒聊/無意義/敷衍偵測
             const chatty = /幾歲|住哪|叫什麼|無聊|你好|哈囉|hi|hello|age|name|誰|笨蛋|機器人|吃飯|睡覺|真的|假的/;
-            const nonsense = /^[\.。,，\?？!！]{2,}$|^.{0,2}$/; // 純符號或太短
+            const nonsense = /^[\.。,，\?？!！]{2,}$|^.{0,2}$/; 
 
             if (chatty.test(text) || nonsense.test(text)) {
-                return 'OFF_TOPIC'; // 視為閒聊
+                return 'OFF_TOPIC'; 
             }
 
             return 'NORMAL';
         }
 
         // ==========================================
-        // 4. 訊息發送邏輯 (關鍵修正：計數器與攔截)
+        // 4. 訊息發送邏輯 (修正：允許前兩次發送)
         // ==========================================
         async function sendTextChat() {
             const input = document.getElementById('ta-input');
             const val = input.value.trim();
             if(!val) return;
             
-            // 1. 顯示使用者訊息
             const taBox = document.getElementById('ta-chat');
             taBox.innerHTML += `<div class="msg user">${val}</div>`;
             taBox.scrollTop = taBox.scrollHeight;
             input.value = "";
 
-            // 2. 執行分析
             const analysis = analyzeTextForStress(val);
             
-            // 3. ★★★ 修正：只要不是 NORMAL，都增加計數器 ★★★
             if (analysis !== 'NORMAL') {
                 state.offTopicCount++;
                 console.log(`異常輸入 (${analysis})，次數：${state.offTopicCount}`);
                 
-                // ★★★ 門檻降為 2 次，反應更靈敏 ★★★
-                if (state.offTopicCount >= 2) {
+                // ★★★ 第3次才攔截 ★★★
+                if (state.offTopicCount >= 3) {
                     triggerEmpathyAI('BOREDOM'); 
-                    return; // ★★★ 強制中斷，不送出給 Gemini ★★★
+                    return; 
                 }
+                // 第1、2次：繼續執行，讓 Gemini 回應
             } else {
-                state.offTopicCount = 0; // 正常對話則歸零
+                state.offTopicCount = 0; 
             }
 
-            // 4. 發送給積木大師
             let messageText = val;
             if (state.taChatHistory.length === 0) {
                 messageText = TA_SYSTEM_PROMPT + "\n\n學生問：" + val;
@@ -546,7 +526,7 @@
         function triggerEmpathyAI(reason) {
             state.isInterventionActive = true;
             state.faceScore = 50; state.mouseScore = 0; state.keyScore = 0;
-            state.offTopicCount = 0; // 重置計數
+            state.offTopicCount = 0; 
             state.empathyChatHistory = [];
             
             const chatBox = document.getElementById('empathy-chat');
@@ -583,7 +563,6 @@
             const val = input.value.trim();
             if(!val) return;
             
-            // 暖心夥伴也要偵測
             const analysis = analyzeTextForStress(val);
             if (analysis !== 'NORMAL') {
                 state.offTopicCount++;

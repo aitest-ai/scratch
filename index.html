@@ -2,7 +2,7 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <title>Scratch 實驗室 (敏感偵測版)</title>
+    <title>Scratch 實驗室 (完美整合版)</title>
     
     <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
@@ -15,7 +15,7 @@
         body { margin: 0; display: flex; height: 100vh; font-family: "Microsoft JhengHei", sans-serif; background: var(--bg); overflow: hidden; }
 
         /* ========================
-           1. 橫向卷軸動畫系統 (Fixed Position)
+           1. 橫向卷軸動畫系統 (修復消失問題)
            ======================== */
         /* 遮罩層 */
         .mission-overlay {
@@ -37,7 +37,7 @@
             align-items: center;
             transition: all 1s cubic-bezier(0.25, 1, 0.5, 1);
             pointer-events: auto;
-            z-index: 9999; 
+            z-index: 10000; /* ★★★ 確保最高層級，不會被 Sidebar 蓋住 ★★★ */
         }
 
         .scroll-handle {
@@ -87,7 +87,7 @@
             width: 100%;
             align-items: flex-start; 
             padding: 10px;
-            background: #FFFDE7; 
+            background: #FFFDE7; /* 確保有背景色 */
             border-width: 2px;
         }
 
@@ -220,7 +220,9 @@
 </head>
 <body>
 
-    <div id="mission-overlay" class="mission-overlay"></div> <div id="scroll-container" class="scroll-container">
+    <div id="mission-overlay" class="mission-overlay"></div>
+
+    <div id="scroll-container" class="scroll-container">
         <div class="scroll-handle left"></div>
         <div class="scroll-body">
             <div class="scroll-content">
@@ -328,7 +330,7 @@
         };
 
         // ==========================================
-        // 0. 開場動畫邏輯 (無等待)
+        // 0. 開場動畫邏輯
         // ==========================================
         window.onload = function() {
             const scroll = document.getElementById('scroll-container');
@@ -337,9 +339,8 @@
             setTimeout(() => { scroll.classList.add('open'); }, 300);
             initSystem();
 
-            // 3秒後直接縮小並移除背景，不等待
             setTimeout(() => {
-                overlay.style.opacity = '0'; // 背景淡出
+                overlay.style.opacity = '0';
                 scroll.classList.remove('open');
                 scroll.classList.add('minimized');
                 setTimeout(() => { overlay.style.display = 'none'; }, 500); 
@@ -372,17 +373,44 @@
         
         document.addEventListener('mousedown', () => { state.clickCount++; });
 
+        // ★★★ 核心迴圈：0.5秒更新一次壓力，確保同步 ★★★
         setInterval(() => {
+            // 1. 計算輸入衰退/增加
             if(state.clickCount > 3) state.mouseScore = Math.min(100, state.mouseScore + 20);
-            
             if(state.keyPressCount > 5) state.keyScore = Math.min(100, state.keyScore + 20);
             else state.keyScore = Math.max(0, state.keyScore - 5);
 
             state.clickCount = 0; state.keyPressCount = 0;
             
+            // 2. 更新子數值 UI
             updateMetricColor('score-mouse', state.mouseScore);
             updateMetricColor('score-key', state.keyScore);
-        }, 1000);
+            updateMetricColor('score-face', state.faceScore); 
+
+            // 3. ★★★ 總壓力計算 (OR Gate: 取最大值) ★★★
+            // 這確保只要有一個數值高，總壓力就高
+            state.stress = Math.max(state.faceScore, state.mouseScore, state.keyScore);
+            
+            // 4. 更新總壓力條 UI
+            document.getElementById('stress-val').innerText = state.stress + "%";
+            const bar = document.getElementById('stress-bar');
+            bar.style.width = state.stress + "%";
+            
+            if(state.stress < 50) document.getElementById('stress-bar').style.background = "#4C97FF";
+            else if(state.stress < 80) document.getElementById('stress-bar').style.background = "#FFAB19";
+            else document.getElementById('stress-bar').style.background = "#FF6B6B";
+
+            // 5. 判斷主導壓力源
+            if (state.stress === state.faceScore) state.dominantStressor = 'FACE';
+            else if (state.stress === state.mouseScore) state.dominantStressor = 'MOUSE';
+            else state.dominantStressor = 'KEY';
+
+            // 6. 觸發介入
+            if(state.stress > 80 && !state.isInterventionActive) {
+                triggerEmpathyAI(state.dominantStressor);
+            }
+
+        }, 500); // 改為 0.5 秒，反應更靈敏
 
         function updateMetricColor(id, score) {
             const el = document.getElementById(id);
@@ -407,7 +435,7 @@
 
                 await faceapi.nets.tinyFaceDetector.loadFromUri('https://justadudewhohacks.github.io/face-api.js/models');
                 await faceapi.nets.faceExpressionNet.loadFromUri('https://justadudewhohacks.github.io/face-api.js/models');
-                startStressLoop();
+                startFaceLoop();
 
             } catch(e) {
                 console.error(e);
@@ -416,7 +444,7 @@
             }
         }
 
-        function startStressLoop() {
+        function startFaceLoop() {
             const video = document.getElementById('video');
             const emoVal = document.getElementById('emo-val');
             
@@ -440,35 +468,85 @@
                     emoVal.innerText = "👀";
                     emoVal.style.color = "#FFD54F";
                 }
-                
-                updateMetricColor('score-face', state.faceScore);
-
-                // ★★★ 壓力計算：取最大值 (MAX) ★★★
-                state.stress = Math.max(state.faceScore, state.mouseScore, state.keyScore);
-                
-                if (state.stress === state.faceScore) state.dominantStressor = 'FACE';
-                else if (state.stress === state.mouseScore) state.dominantStressor = 'MOUSE';
-                else state.dominantStressor = 'KEY';
-
-                document.getElementById('stress-val').innerText = state.stress + "%";
-                const bar = document.getElementById('stress-bar');
-                bar.style.width = state.stress + "%";
-                
-                if(state.stress < 50) document.getElementById('stress-bar').style.background = "#4C97FF";
-                else if(state.stress < 80) document.getElementById('stress-bar').style.background = "#FFAB19";
-                else document.getElementById('stress-bar').style.background = "#FF6B6B";
-
-                if(state.stress > 80) triggerEmpathyAI(state.dominantStressor);
-
-            }, 1000);
+            }, 1000); // 臉部偵測維持 1秒
         }
 
         // ==========================================
-        // 4. 暖心 AI
+        // 3. 全方位文字分析 (判定與計數修復)
+        // ==========================================
+        function analyzeTextForStress(text) {
+            // 1. 嚴格亂碼偵測 (新增 1234, asdf, 連續字元)
+            // 只要有連續3個重複字元，或常見鍵盤序列
+            const gibberish = /(.)\1{2,}|asdf|qwer|zxcv|1234|uiop|hjkl/i;
+            
+            // 2. 負面/情緒關鍵字
+            const badWords = /煩|討厭|爛|笨|死|不會|難|哭|靠|媽的|機車|滾|醜|白癡|智障|幹/;
+
+            if (gibberish.test(text) || badWords.test(text)) {
+                // 懲罰機制：鍵盤壓力瞬間 +30%
+                state.keyScore = Math.min(100, state.keyScore + 30);
+                return 'STRESS'; // 視為壓力/搗蛋
+            }
+
+            // 3. 閒聊/無意義/敷衍偵測
+            const chatty = /幾歲|住哪|叫什麼|無聊|你好|哈囉|hi|hello|age|name|誰|笨蛋|機器人|吃飯|睡覺|真的|假的/;
+            const nonsense = /^[\.。,，\?？!！]{2,}$|^.{0,2}$/; // 純符號或太短
+
+            if (chatty.test(text) || nonsense.test(text)) {
+                return 'OFF_TOPIC'; // 視為閒聊
+            }
+
+            return 'NORMAL';
+        }
+
+        // ==========================================
+        // 4. 訊息發送邏輯 (關鍵修正：計數器與攔截)
+        // ==========================================
+        async function sendTextChat() {
+            const input = document.getElementById('ta-input');
+            const val = input.value.trim();
+            if(!val) return;
+            
+            // 1. 顯示使用者訊息
+            const taBox = document.getElementById('ta-chat');
+            taBox.innerHTML += `<div class="msg user">${val}</div>`;
+            taBox.scrollTop = taBox.scrollHeight;
+            input.value = "";
+
+            // 2. 執行分析
+            const analysis = analyzeTextForStress(val);
+            
+            // 3. ★★★ 修正：只要不是 NORMAL，都增加計數器 ★★★
+            if (analysis !== 'NORMAL') {
+                state.offTopicCount++;
+                console.log(`異常輸入 (${analysis})，次數：${state.offTopicCount}`);
+                
+                // ★★★ 門檻降為 2 次，反應更靈敏 ★★★
+                if (state.offTopicCount >= 2) {
+                    triggerEmpathyAI('BOREDOM'); 
+                    return; // ★★★ 強制中斷，不送出給 Gemini ★★★
+                }
+            } else {
+                state.offTopicCount = 0; // 正常對話則歸零
+            }
+
+            // 4. 發送給積木大師
+            let messageText = val;
+            if (state.taChatHistory.length === 0) {
+                messageText = TA_SYSTEM_PROMPT + "\n\n學生問：" + val;
+            }
+
+            state.taChatHistory.push({ role: 'user', parts: [{ text: messageText }] });
+            await sendToGeminiTA();
+        }
+
+        // ==========================================
+        // 5. 暖心 AI
         // ==========================================
         function triggerEmpathyAI(reason) {
             state.isInterventionActive = true;
             state.faceScore = 50; state.mouseScore = 0; state.keyScore = 0;
+            state.offTopicCount = 0; // 重置計數
             state.empathyChatHistory = [];
             
             const chatBox = document.getElementById('empathy-chat');
@@ -476,7 +554,6 @@
 
             let openingMsg = "";
             
-            // ★★★ 觸發原因：分心/無聊 ★★★
             if (reason === 'BOREDOM') {
                 openingMsg = "嘿！我發現我們好像聊開了～😆 <br>雖然聊天很開心，但我是不是讓你覺得寫程式有點無聊？<br>其實學會這個，你可以做超酷的遊戲給朋友玩喔！要不要試試看？";
             } else {
@@ -487,7 +564,6 @@
             }
 
             openingMsg += "<br>(你可以跟我說說你的想法)";
-            
             addEmpathyMsg('warm', openingMsg);
             document.getElementById('empathy-modal').style.display = 'flex';
         }
@@ -499,11 +575,7 @@
             div.innerHTML = text;
             box.appendChild(div);
             box.scrollTop = box.scrollHeight;
-            
-            state.empathyChatHistory.push({
-                role: type === 'warm' ? 'model' : 'user',
-                parts: [{ text: text }]
-            });
+            state.empathyChatHistory.push({ role: type === 'warm' ? 'model' : 'user', parts: [{ text: text }] });
         }
 
         async function sendEmpathyChat() {
@@ -511,9 +583,9 @@
             const val = input.value.trim();
             if(!val) return;
             
-            // 暖心夥伴也要偵測 (避免在暖心模式還一直亂)
+            // 暖心夥伴也要偵測
             const analysis = analyzeTextForStress(val);
-            if (analysis === 'OFF_TOPIC') {
+            if (analysis !== 'NORMAL') {
                 state.offTopicCount++;
                 if(state.offTopicCount >= 3) {
                     addEmpathyMsg('warm', "看來你真的很不想寫程式吼 😂 好啦，我們再給積木大師一次機會，做完這個我們就休息！");
@@ -537,10 +609,7 @@
             `;
 
             const payload = {
-                contents: [
-                    { role: 'user', parts: [{ text: prompt }] },
-                    ...state.empathyChatHistory
-                ]
+                contents: [ { role: 'user', parts: [{ text: prompt }] }, ...state.empathyChatHistory ]
             };
 
             try {
@@ -571,37 +640,6 @@
             setTimeout(() => { state.isInterventionActive = false; }, 5000);
         }
 
-        // ==========================================
-        // ★★★ 全方位文字分析 (增強版) ★★★
-        // ==========================================
-        function analyzeTextForStress(text) {
-            // 1. 亂碼/重複字元 (如 aaaaa, !!!!!, 123123123)
-            const gibberishPattern = /(.)\1{4,}|[a-zA-Z0-9]{15,}|[!@#$%^&*()_+]{5,}/;
-            
-            // 2. 閒聊/無意義/敷衍偵測
-            const chattyPattern = /幾歲|住哪|叫什麼|無聊|你好|哈囉|hi|hello|age|name|誰|笨蛋|機器人|asdf|qwer|zxcv/;
-            const nonsensePattern = /^[\.。,，\?？!！]{2,}$|^.{0,2}$/; // 太短或純符號
-            
-            // 3. 負面情緒關鍵字
-            const badWords = /煩|討厭|爛|笨|死|不會|難|哭|靠|媽的|機車|滾|醜|白癡|智障|幹/;
-
-            if (gibberishPattern.test(text) || badWords.test(text)) {
-                // 亂碼或髒話：算壓力
-                state.keyScore = Math.min(100, state.keyScore + 40);
-                updateMetricColor('score-key', state.keyScore);
-                console.log("[系統偵測] 負面/亂碼內容");
-                return 'OFF_TOPIC'; // 視為搗蛋
-            }
-
-            if (chattyPattern.test(text) || nonsensePattern.test(text)) {
-                // 閒聊：算分心
-                console.log("[系統偵測] 閒聊/無意義內容");
-                return 'OFF_TOPIC';
-            }
-
-            return 'NORMAL';
-        }
-
         async function sendToGeminiTA() {
             const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${API_KEY}`;
             const taBox = document.getElementById('ta-chat');
@@ -619,57 +657,13 @@
                 taBox.innerHTML += `<div class="msg ai">${marked.parse(reply)}</div>`;
                 taBox.scrollTop = taBox.scrollHeight;
 
-                state.taChatHistory.push({
-                    role: 'model',
-                    parts: [{ text: reply }]
-                });
+                state.taChatHistory.push({ role: 'model', parts: [{ text: reply }] });
 
             } catch(e) {
+                console.error("Gemini Connection Error:", e);
                 taBox.innerHTML += `<div class="msg ai">連線發生錯誤，請稍後再試。</div>`;
                 state.taChatHistory.pop();
             }
-        }
-
-        async function sendTextChat() {
-            const input = document.getElementById('ta-input');
-            const val = input.value.trim();
-            if(!val) return;
-            
-            // ★★★ 關鍵修正：確實攔截 ★★★
-            const analysis = analyzeTextForStress(val);
-            
-            if (analysis === 'OFF_TOPIC') {
-                state.offTopicCount++;
-                console.log("偵測到閒聊/分心，次數：", state.offTopicCount);
-                
-                if (state.offTopicCount >= 3) {
-                    // 清空輸入框
-                    input.value = "";
-                    // 觸發暖心夥伴
-                    triggerEmpathyAI('BOREDOM'); 
-                    // ★★★ 直接 return，不呼叫 Gemini TA ★★★
-                    return; 
-                }
-            } else {
-                state.offTopicCount = 0; 
-            }
-
-            const taBox = document.getElementById('ta-chat');
-            taBox.innerHTML += `<div class="msg user">${val}</div>`;
-            taBox.scrollTop = taBox.scrollHeight;
-            input.value = "";
-
-            let messageText = val;
-            if (state.taChatHistory.length === 0) {
-                messageText = TA_SYSTEM_PROMPT + "\n\n學生問：" + val;
-            }
-
-            state.taChatHistory.push({
-                role: 'user',
-                parts: [{ text: messageText }]
-            });
-
-            await sendToGeminiTA();
         }
 
         async function captureAndAnalyze(mode) {
@@ -696,22 +690,15 @@
                 const w = videoEl.videoWidth;
                 const h = videoEl.videoHeight;
                 
-                const cropX = w * 0.20; 
-                const cropY = h * 0.10; 
-                const cropW = w * 0.45; 
-                const cropH = h * 0.80; 
+                const cropX = w * 0.20; const cropY = h * 0.10; 
+                const cropW = w * 0.45; const cropH = h * 0.80; 
 
-                let finalW = cropW;
-                let finalH = cropH;
+                let finalW = cropW; let finalH = cropH;
                 if (finalW > 800) {
-                    const scale = 800 / finalW;
-                    finalW = 800;
-                    finalH = cropH * scale;
+                    const scale = 800 / finalW; finalW = 800; finalH = cropH * scale;
                 }
 
-                canvas.width = finalW;
-                canvas.height = finalH;
-                
+                canvas.width = finalW; canvas.height = finalH;
                 const ctx = canvas.getContext('2d');
                 ctx.drawImage(videoEl, cropX, cropY, cropW, cropH, 0, 0, finalW, finalH);
                 
@@ -730,10 +717,7 @@
 
                 state.taChatHistory.push({
                     role: 'user',
-                    parts: [
-                        { text: userPrompt },
-                        { inline_data: { mime_type: "image/jpeg", data: cleanBase64 } }
-                    ]
+                    parts: [ { text: userPrompt }, { inline_data: { mime_type: "image/jpeg", data: cleanBase64 } } ]
                 });
 
                 await sendToGeminiTA();
@@ -742,9 +726,7 @@
                 console.error(e);
                 if(mode.includes('TA')) taBox.innerHTML += `<div class="msg ai">⚠️ 截圖失敗，請重試。</div>`;
             } finally {
-                if (stream) {
-                    stream.getTracks().forEach(track => track.stop());
-                }
+                if (stream) { stream.getTracks().forEach(track => track.stop()); }
                 const videoEl = document.getElementById('capture-video');
                 videoEl.srcObject = null;
             }

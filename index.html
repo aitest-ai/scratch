@@ -2,7 +2,7 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <title>Scratch 實驗室 (邏輯修復版)</title>
+    <title>Scratch 實驗室 (敏感偵測版)</title>
     
     <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
@@ -15,21 +15,21 @@
         body { margin: 0; display: flex; height: 100vh; font-family: "Microsoft JhengHei", sans-serif; background: var(--bg); overflow: hidden; }
 
         /* ========================
-           1. 橫向卷軸動畫系統
+           1. 橫向卷軸動畫系統 (Fixed Position)
            ======================== */
-        /* 遮罩層 (背景變黑) */
+        /* 遮罩層 */
         .mission-overlay {
             position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
-            background: rgba(0,0,0,0.7); z-index: 9000; /* 比卷軸低一點 */
+            background: rgba(0,0,0,0.7); z-index: 9000; 
             display: flex; justify-content: center; align-items: center;
             transition: opacity 0.5s ease;
             pointer-events: none; 
         }
 
-        /* 卷軸本體 (獨立於遮罩層) */
+        /* 卷軸本體 */
         .scroll-container {
-            position: fixed; /* 改為 Fixed 以便在螢幕上自由飛行 */
-            top: 50%; left: 50%; /* 初始置中 */
+            position: fixed; 
+            top: 50%; left: 50%; 
             transform: translate(-50%, -50%);
             height: 320px; 
             width: 0px;    
@@ -37,7 +37,7 @@
             align-items: center;
             transition: all 1s cubic-bezier(0.25, 1, 0.5, 1);
             pointer-events: auto;
-            z-index: 9999; /* 最高層級 */
+            z-index: 9999; 
         }
 
         .scroll-handle {
@@ -70,12 +70,12 @@
         .scroll-container.open { width: 700px; } 
         .scroll-container.open .scroll-body { width: 100%; }
 
-        /* === 縮小收回狀態 (精準對齊) === */
+        /* === 縮小收回狀態 (精準對齊 Sidebar) === */
         .scroll-container.minimized {
             top: 15px !important; 
             left: 15px !important; 
-            transform: translate(0, 0) !important; /* 移除置中偏移 */
-            width: 290px !important; /* 對齊 Sidebar 寬度 */
+            transform: translate(0, 0) !important;
+            width: 290px !important; /* Sidebar 320 - padding 30 */
             height: 160px !important; 
         }
         
@@ -91,7 +91,7 @@
             border-width: 2px;
         }
 
-        /* 內容排版優化 */
+        /* 內容排版 */
         .scroll-content { 
             opacity: 0; transition: opacity 0.5s 0.8s; width: 80%; 
             white-space: nowrap; 
@@ -322,13 +322,13 @@
             isInterventionActive: false,
             clickCount: 0, keyPressCount: 0, mousePositions: [],
             dominantStressor: '',
-            offTopicCount: 0,       // 分心計數器
+            offTopicCount: 0,       
             empathyChatHistory: [], 
             taChatHistory: []       
         };
 
         // ==========================================
-        // 0. 開場動畫邏輯
+        // 0. 開場動畫邏輯 (無等待)
         // ==========================================
         window.onload = function() {
             const scroll = document.getElementById('scroll-container');
@@ -342,7 +342,7 @@
                 overlay.style.opacity = '0'; // 背景淡出
                 scroll.classList.remove('open');
                 scroll.classList.add('minimized');
-                setTimeout(() => { overlay.style.display = 'none'; }, 500); // 移除元素
+                setTimeout(() => { overlay.style.display = 'none'; }, 500); 
             }, 3300); 
         };
 
@@ -361,7 +361,7 @@
                     dist += Math.sqrt(Math.pow(p2.x-p1.x, 2) + Math.pow(p2.y-p1.y, 2));
                 }
                 if(dist > 2000) state.mouseScore = Math.min(100, state.mouseScore + 10);
-                else state.mouseScore = Math.max(0, state.mouseScore - 5); // 緩慢下降
+                else state.mouseScore = Math.max(0, state.mouseScore - 5); 
             }
         });
         
@@ -443,10 +443,9 @@
                 
                 updateMetricColor('score-face', state.faceScore);
 
-                // ★★★ 修正：嚴格使用 MAX 邏輯，只要有一個飆高，總壓力就飆高 ★★★
+                // ★★★ 壓力計算：取最大值 (MAX) ★★★
                 state.stress = Math.max(state.faceScore, state.mouseScore, state.keyScore);
                 
-                // 找出主導壓力源
                 if (state.stress === state.faceScore) state.dominantStressor = 'FACE';
                 else if (state.stress === state.mouseScore) state.dominantStressor = 'MOUSE';
                 else state.dominantStressor = 'KEY';
@@ -477,7 +476,7 @@
 
             let openingMsg = "";
             
-            // ★★★ 特殊情境：分心/閒聊/搗蛋 ★★★
+            // ★★★ 觸發原因：分心/無聊 ★★★
             if (reason === 'BOREDOM') {
                 openingMsg = "嘿！我發現我們好像聊開了～😆 <br>雖然聊天很開心，但我是不是讓你覺得寫程式有點無聊？<br>其實學會這個，你可以做超酷的遊戲給朋友玩喔！要不要試試看？";
             } else {
@@ -512,7 +511,7 @@
             const val = input.value.trim();
             if(!val) return;
             
-            // 暖心模式也要偵測
+            // 暖心夥伴也要偵測 (避免在暖心模式還一直亂)
             const analysis = analyzeTextForStress(val);
             if (analysis === 'OFF_TOPIC') {
                 state.offTopicCount++;
@@ -573,22 +572,30 @@
         }
 
         // ==========================================
-        // ★★★ 全方位文字分析 (含強制觸發) ★★★
+        // ★★★ 全方位文字分析 (增強版) ★★★
         // ==========================================
         function analyzeTextForStress(text) {
-            // 1. 壓力/負面偵測
-            const stressPattern = /(.)\1{4,}|煩|討厭|爛|笨|死|不會|難|哭|靠|媽的|機車|滾|醜|白癡|智障|幹/;
-            if (stressPattern.test(text)) {
-                state.keyScore = Math.min(100, state.keyScore + 30);
-                updateMetricColor('score-key', state.keyScore);
-                return 'STRESS';
-            }
-
-            // 2. 閒聊/無意義偵測
-            const chattyPattern = /幾歲|住哪|叫什麼|無聊|你好|哈囉|hi|hello|age|name|誰|笨蛋|機器人/;
+            // 1. 亂碼/重複字元 (如 aaaaa, !!!!!, 123123123)
+            const gibberishPattern = /(.)\1{4,}|[a-zA-Z0-9]{15,}|[!@#$%^&*()_+]{5,}/;
+            
+            // 2. 閒聊/無意義/敷衍偵測
+            const chattyPattern = /幾歲|住哪|叫什麼|無聊|你好|哈囉|hi|hello|age|name|誰|笨蛋|機器人|asdf|qwer|zxcv/;
             const nonsensePattern = /^[\.。,，\?？!！]{2,}$|^.{0,2}$/; // 太短或純符號
             
+            // 3. 負面情緒關鍵字
+            const badWords = /煩|討厭|爛|笨|死|不會|難|哭|靠|媽的|機車|滾|醜|白癡|智障|幹/;
+
+            if (gibberishPattern.test(text) || badWords.test(text)) {
+                // 亂碼或髒話：算壓力
+                state.keyScore = Math.min(100, state.keyScore + 40);
+                updateMetricColor('score-key', state.keyScore);
+                console.log("[系統偵測] 負面/亂碼內容");
+                return 'OFF_TOPIC'; // 視為搗蛋
+            }
+
             if (chattyPattern.test(text) || nonsensePattern.test(text)) {
+                // 閒聊：算分心
+                console.log("[系統偵測] 閒聊/無意義內容");
                 return 'OFF_TOPIC';
             }
 
@@ -628,7 +635,7 @@
             const val = input.value.trim();
             if(!val) return;
             
-            // ★★★ 關鍵修正：先分析，如果連續3次閒聊，強制觸發暖心夥伴並中斷 ★★★
+            // ★★★ 關鍵修正：確實攔截 ★★★
             const analysis = analyzeTextForStress(val);
             
             if (analysis === 'OFF_TOPIC') {
@@ -638,13 +645,12 @@
                 if (state.offTopicCount >= 3) {
                     // 清空輸入框
                     input.value = "";
-                    // 觸發暖心夥伴 (Boredom 模式)
+                    // 觸發暖心夥伴
                     triggerEmpathyAI('BOREDOM'); 
-                    // ★★★ 重要：直接 return，不呼叫 Gemini TA ★★★
+                    // ★★★ 直接 return，不呼叫 Gemini TA ★★★
                     return; 
                 }
             } else {
-                // 如果講話正常，重置計數器
                 state.offTopicCount = 0; 
             }
 

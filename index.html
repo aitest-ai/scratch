@@ -2,7 +2,7 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <title>Scratch 實驗室 (全方位偵測版)</title>
+    <title>Scratch 實驗室 (動機引導版)</title>
     
     <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
@@ -21,7 +21,8 @@
             position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
             background: rgba(0,0,0,0.6); z-index: 9999;
             display: flex; justify-content: center; align-items: center;
-            transition: background 0.8s ease 4.5s;
+            /* ★ 修改：移除延遲，讓背景消失更靈敏 */
+            transition: opacity 0.5s ease;
             pointer-events: none; 
         }
 
@@ -87,7 +88,7 @@
             border-width: 2px;
         }
 
-        /* 內容排版優化 */
+        /* 內容排版 */
         .scroll-content { 
             opacity: 0; transition: opacity 0.5s 0.8s; width: 80%; 
             white-space: nowrap; 
@@ -303,7 +304,7 @@
     <canvas id="capture-canvas"></canvas>
 
     <script>
-        const API_KEY = "AIzaSyC6j2Av7HBAHtagra09-GiVOigUWeZkMxs"; // ★★★ 請務必填入您的 API Key ★★★
+        const API_KEY = "AIzaSyBXZ7enyD8BdWbuE7lR8V_Akj1KFKucYl0"; // ★★★ 請務必填入您的 API Key ★★★
         
         const TA_SYSTEM_PROMPT = `
         你是 Scratch 積木大師。對象是小學高年級。
@@ -320,6 +321,7 @@
             isInterventionActive: false,
             clickCount: 0, keyPressCount: 0, mousePositions: [],
             dominantStressor: '',
+            offTopicCount: 0,       // ★★★ 新增：分心計數器 ★★★
             empathyChatHistory: [], 
             taChatHistory: []       
         };
@@ -334,16 +336,18 @@
             setTimeout(() => { scroll.classList.add('open'); }, 300);
             initSystem();
 
+            // ★ 修改：3秒後直接縮小並移除背景，不等待
             setTimeout(() => {
-                overlay.style.background = 'rgba(0,0,0,0)';
-                overlay.style.pointerEvents = 'none'; 
+                overlay.style.opacity = '0';
                 scroll.classList.remove('open');
                 scroll.classList.add('minimized');
-            }, 5500); 
+                // 等待淡出動畫結束後完全移除
+                setTimeout(() => { overlay.style.display = 'none'; }, 500);
+            }, 3300); 
         };
 
         // ==========================================
-        // 1. 行為偵測 (含輸入框過濾)
+        // 1. 行為偵測
         // ==========================================
         document.addEventListener('mousemove', (e) => {
             const now = Date.now();
@@ -357,12 +361,12 @@
                     dist += Math.sqrt(Math.pow(p2.x-p1.x, 2) + Math.pow(p2.y-p1.y, 2));
                 }
                 if(dist > 2000) state.mouseScore = Math.min(100, state.mouseScore + 10);
+                else state.mouseScore = Math.max(0, state.mouseScore - 5); // 緩慢下降
             }
         });
         
-        // ★★★ 如果是對話框，不計入 Key Press ★★★
         document.addEventListener('keydown', (e) => { 
-            if(e.target.tagName === 'INPUT' && (e.target.id === 'ta-input' || e.target.id === 'emp-input')) return;
+            if(e.target.tagName === 'INPUT') return;
             state.keyPressCount++; 
         });
         
@@ -370,12 +374,12 @@
 
         setInterval(() => {
             if(state.clickCount > 3) state.mouseScore = Math.min(100, state.mouseScore + 20);
-            else state.mouseScore = Math.max(0, state.mouseScore - 5);
-
+            
             if(state.keyPressCount > 5) state.keyScore = Math.min(100, state.keyScore + 20);
             else state.keyScore = Math.max(0, state.keyScore - 5);
 
             state.clickCount = 0; state.keyPressCount = 0;
+            
             updateMetricColor('score-mouse', state.mouseScore);
             updateMetricColor('score-key', state.keyScore);
         }, 1000);
@@ -396,16 +400,13 @@
 
             try {
                 errorMsg.style.display = 'none';
-                emoVal.innerText = "正在呼叫相機...";
+                emoVal.innerText = "偵測中...";
                 const stream = await navigator.mediaDevices.getUserMedia({ video: true });
                 video.srcObject = stream;
                 video.onloadedmetadata = () => { video.play(); };
 
-                emoVal.innerText = "準備中...";
                 await faceapi.nets.tinyFaceDetector.loadFromUri('https://justadudewhohacks.github.io/face-api.js/models');
                 await faceapi.nets.faceExpressionNet.loadFromUri('https://justadudewhohacks.github.io/face-api.js/models');
-                
-                emoVal.innerText = "偵測中...";
                 startStressLoop();
 
             } catch(e) {
@@ -436,17 +437,20 @@
                     else if(top === 'happy') state.faceScore = Math.max(0, state.faceScore - 10); 
                     else state.faceScore = Math.max(0, state.faceScore - 2); 
                 } else {
-                    emoVal.innerText = "找不到臉 👀";
+                    emoVal.innerText = "👀";
                     emoVal.style.color = "#FFD54F";
                 }
                 
                 updateMetricColor('score-face', state.faceScore);
 
-                if (state.faceScore >= state.mouseScore && state.faceScore >= state.keyScore) state.dominantStressor = 'FACE';
-                else if (state.mouseScore >= state.keyScore) state.dominantStressor = 'MOUSE';
+                // ★★★ 修改：壓力判定邏輯改為 OR (取最大值) ★★★
+                state.stress = Math.max(state.faceScore, state.mouseScore, state.keyScore);
+                
+                // 找出主導壓力源
+                if (state.stress === state.faceScore) state.dominantStressor = 'FACE';
+                else if (state.stress === state.mouseScore) state.dominantStressor = 'MOUSE';
                 else state.dominantStressor = 'KEY';
 
-                state.stress = Math.max(state.faceScore, state.mouseScore, state.keyScore);
                 document.getElementById('stress-val').innerText = state.stress + "%";
                 const bar = document.getElementById('stress-bar');
                 bar.style.width = state.stress + "%";
@@ -472,12 +476,18 @@
             chatBox.innerHTML = ''; 
 
             let openingMsg = "";
-            if (reason === 'FACE') openingMsg = "你看起來有點困擾，是不是程式卡關了？";
-            else if (reason === 'MOUSE') openingMsg = "我發現你的滑鼠移動得有點急，是不是心裡有點著急？";
-            else if (reason === 'KEY') openingMsg = "敲鍵盤的力道有點大喔，手會痠的。";
-            else openingMsg = "感覺你現在壓力有點大，我們先休息一下。";
+            
+            // ★★★ 新增：分心/閒聊的特殊開場白 ★★★
+            if (reason === 'BOREDOM') {
+                openingMsg = "嘿！我發現我們好像聊開了～😆 <br>雖然聊天很開心，但我是不是讓你覺得寫程式有點無聊？<br>其實學會這個，你可以做超酷的遊戲給朋友玩喔！要不要試試看？";
+            } else {
+                if (reason === 'FACE') openingMsg = "你看起來有點困擾，是不是程式卡關了？";
+                else if (reason === 'MOUSE') openingMsg = "我發現你的滑鼠移動得有點急，是不是心裡有點著急？";
+                else if (reason === 'KEY') openingMsg = "敲鍵盤的力道有點大喔，手會痠的，我們休息一下。";
+                else openingMsg = "感覺你現在壓力有點大，我們先深呼吸。";
+            }
 
-            openingMsg += "<br>跟我說說看，發生什麼事了嗎？（你可以打字跟我聊天）";
+            openingMsg += "<br>(你可以跟我說說你的想法)";
             
             addEmpathyMsg('warm', openingMsg);
             document.getElementById('empathy-modal').style.display = 'flex';
@@ -497,25 +507,34 @@
             });
         }
 
-        // ★★★ 暖心夥伴也要偵測負面用語 ★★★
         async function sendEmpathyChat() {
             const input = document.getElementById('emp-input');
             const val = input.value.trim();
             if(!val) return;
             
-            // 偵測是否為無效/負面輸入
-            analyzeTextForStress(val);
+            const analysis = analyzeTextForStress(val);
+            if (analysis === 'OFF_TOPIC') {
+                state.offTopicCount++;
+                if(state.offTopicCount >= 3) {
+                    // 如果在暖心模式還一直亂聊，可以用更幽默的方式拉回
+                    addEmpathyMsg('warm', "看來你真的很不想寫程式吼 😂 好啦，我們再給積木大師一次機會，做完這個我們就休息！");
+                    input.value = "";
+                    return;
+                }
+            } else {
+                state.offTopicCount = 0; // 恢復正常對話則重置
+            }
 
             addEmpathyMsg('user', val);
             input.value = "";
 
             const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${API_KEY}`;
             const prompt = `
-            你是一個「暖心夥伴」。使用者是小學高年級學生，目前學習程式遇到挫折，壓力很大。
-            你的任務是：
-            1. **專注於同理與傾聽**：不要急著給程式建議，先聽他發牢騷。
-            2. **語氣**：像朋友一樣溫柔，不用疊字，適量 emoji。
-            3. **目標**：引導他冷靜下來，最後鼓勵他「如果準備好了，可以按下面的按鈕請積木大師幫忙」。
+            你是一個「暖心夥伴」。使用者是小學高年級學生。
+            目標：
+            1. 如果學生在發洩情緒，請同理並安撫。
+            2. 如果學生覺得無聊或在閒聊，請用幽默風趣的方式，告訴他學會 Scratch 可以做很多很酷的事情（例如做動畫送給朋友、做遊戲），引導他回到學習。
+            3. 語氣要像好朋友，不要像老師說教。
             `;
 
             const payload = {
@@ -540,6 +559,7 @@
 
         function closeEmpathy() {
             document.getElementById('empathy-modal').style.display = 'none';
+            state.offTopicCount = 0; // 重置計數器
             setTimeout(() => { state.isInterventionActive = false; }, 5000);
         }
 
@@ -547,16 +567,41 @@
             document.getElementById('empathy-modal').style.display = 'none';
             const taBox = document.getElementById('ta-chat');
             taBox.innerHTML += `<div class="msg system">✨ 暖心夥伴已通知積木大師...</div>`;
+            state.offTopicCount = 0; // 重置計數器
             captureAndAnalyze('TA_STRESSED_' + state.dominantStressor);
             setTimeout(() => { state.isInterventionActive = false; }, 5000);
         }
 
         // ==========================================
-        // ★★★ 積木大師 AI + 關鍵字壓力分析 ★★★
+        // ★★★ 文字分析函式 (壓力 + 閒聊) ★★★
+        // ==========================================
+        function analyzeTextForStress(text) {
+            // 1. 壓力/負面偵測
+            const stressPattern = /(.)\1{4,}|煩|討厭|爛|笨|死|不會|難|哭|靠|媽的|機車|滾|醜|白癡|智障|幹/;
+            if (stressPattern.test(text)) {
+                state.keyScore = Math.min(100, state.keyScore + 30);
+                updateMetricColor('score-key', state.keyScore);
+                return 'STRESS';
+            }
+
+            // 2. 閒聊/無意義偵測
+            const chattyPattern = /幾歲|住哪|叫什麼|無聊|你好|哈囉|hi|hello|age|name|誰|笨蛋|機器人/;
+            // 或是純符號/太短的敷衍
+            const nonsensePattern = /^[\.。,，\?？!！]{2,}$|^.{0,2}$/; 
+            
+            if (chattyPattern.test(text) || nonsensePattern.test(text)) {
+                return 'OFF_TOPIC';
+            }
+
+            return 'NORMAL';
+        }
+
+        // ==========================================
+        // ★★★ 積木大師 AI 邏輯 ★★★
         // ==========================================
 
         async function sendToGeminiTA() {
-            const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${API_KEY}`;
+            const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${API_KEY}`;
             const taBox = document.getElementById('ta-chat');
 
             try {
@@ -587,40 +632,27 @@
             }
         }
 
-        // ★★★ 全方位文字壓力偵測函式 ★★★
-        function analyzeTextForStress(text) {
-            let isStressful = false;
-
-            // 1. 偵測連續重複字元 (如 aaaaa, !!!!!)
-            if (/(.)\1{4,}/.test(text)) isStressful = true;
-
-            // 2. 偵測過長無空格字串 (亂碼)
-            if (/^[a-zA-Z0-9]{15,}$/.test(text) && !text.includes(' ')) isStressful = true;
-
-            // 3. 偵測負面/情緒性/無關學習關鍵字
-            const badWords = /煩|討厭|爛|笨|死|不會|難|哭|靠|媽的|機車|滾|醜|隨便|無聊|白癡|智障|幹/;
-            if (badWords.test(text)) isStressful = true;
-
-            // 4. 偵測敷衍符號 (如 ... 或 。。。)
-            if (/^[\.。,，]{2,}$/.test(text)) isStressful = true;
-
-            if (isStressful) {
-                // 懲罰機制：鍵盤壓力指數瞬間 +30%
-                state.keyScore = Math.min(100, state.keyScore + 30);
-                updateMetricColor('score-key', state.keyScore);
-                console.log("偵測到壓力/負面輸入，已增加壓力指數。");
-                return true;
-            }
-            return false;
-        }
-
         async function sendTextChat() {
             const input = document.getElementById('ta-input');
             const val = input.value.trim();
             if(!val) return;
             
-            // ★★★ 積木大師也要執行壓力偵測 ★★★
-            analyzeTextForStress(val);
+            // ★★★ 執行分析 ★★★
+            const analysis = analyzeTextForStress(val);
+            
+            if (analysis === 'OFF_TOPIC') {
+                state.offTopicCount++;
+                console.log("偵測到閒聊/分心，次數：", state.offTopicCount);
+                
+                // 連續 3 次分心，觸發暖心夥伴
+                if (state.offTopicCount >= 3) {
+                    triggerEmpathyAI('BOREDOM'); 
+                    input.value = "";
+                    return; // 中斷發送給積木大師，直接跳轉
+                }
+            } else {
+                state.offTopicCount = 0; // 正常對話則歸零
+            }
 
             const taBox = document.getElementById('ta-chat');
             taBox.innerHTML += `<div class="msg user">${val}</div>`;
